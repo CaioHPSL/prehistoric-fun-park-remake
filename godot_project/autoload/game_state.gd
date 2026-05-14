@@ -4,9 +4,11 @@ extends Node
 
 const TILE_TYPE_PATH: String = "path"
 const TILE_TYPE_ATTRACTION: String = "attraction"
+const ENTRY_TILE: Vector2i = Vector2i(15, 29)
+const INITIAL_PATH_TILE: Vector2i = Vector2i(15, 28)
 
-var map_width: int = 60
-var map_height: int = 60
+var map_width: int = 30
+var map_height: int = 30
 var current_mode: String = "select"
 var selected_tile: Vector2i = Vector2i(-1, -1)
 var selected_catalog_id: String = ""
@@ -22,6 +24,7 @@ func reset_session() -> void:
 	tiles = []
 	buildings = []
 	visitors = []
+	add_path_tile(INITIAL_PATH_TILE)
 
 
 func is_tile_used(tile: Vector2i) -> bool:
@@ -38,8 +41,16 @@ func get_tile_type(tile: Vector2i) -> String:
 	return ""
 
 
+func is_entrance_tile(tile: Vector2i) -> bool:
+	return tile == ENTRY_TILE
+
+
+func is_tile_reserved(tile: Vector2i) -> bool:
+	return is_entrance_tile(tile)
+
+
 func add_path_tile(tile: Vector2i) -> bool:
-	if is_tile_used(tile):
+	if is_tile_used(tile) or is_tile_reserved(tile):
 		return false
 	tiles.append({
 		"x": tile.x,
@@ -66,7 +77,8 @@ func can_place_area(origin: Vector2i, size: Vector2i) -> bool:
 		return false
 	for x in range(origin.x, origin.x + size.x):
 		for y in range(origin.y, origin.y + size.y):
-			if is_tile_used(Vector2i(x, y)):
+			var checked_tile: Vector2i = Vector2i(x, y)
+			if is_tile_used(checked_tile) or is_tile_reserved(checked_tile):
 				return false
 	return true
 
@@ -194,8 +206,8 @@ func to_save_data() -> Dictionary:
 
 
 func from_save_data(data: Dictionary) -> void:
-	map_width = int(data.get("map_width", 60))
-	map_height = int(data.get("map_height", 60))
+	map_width = int(data.get("map_width", 30))
+	map_height = int(data.get("map_height", 30))
 	tiles = data.get("tiles", [])
 	buildings = data.get("buildings", [])
 	visitors = data.get("visitors", [])

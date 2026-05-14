@@ -65,12 +65,16 @@ func select_building(building_id: String) -> void:
 		_show_build_mode("Build: Path")
 	elif building_id == "basic_attraction":
 		_show_build_mode("Build: Attraction")
+	if iso_map.has_method("refresh_tiles"):
+		iso_map.refresh_tiles()
 
 
 func clear_build_mode() -> void:
 	GameState.current_mode = "select"
 	GameState.selected_catalog_id = ""
 	_show_build_mode("Build: none")
+	if iso_map.has_method("refresh_tiles"):
+		iso_map.refresh_tiles()
 
 
 func clear_selection() -> void:
@@ -111,6 +115,11 @@ func _on_selection_cleared() -> void:
 func _show_build_mode(mode_text: String) -> void:
 	if hud.has_method("show_build_mode"):
 		hud.show_build_mode(mode_text)
+
+
+func _show_error_message(message: String) -> void:
+	if hud.has_method("show_message"):
+		hud.show_message(message)
 
 
 func _show_selected_object(tile: Vector2i) -> void:
@@ -175,7 +184,7 @@ func _on_building_sell_pressed() -> void:
 		refund = 125
 	if not sold:
 		return
-	Economy.earn(refund)
+	Economy.money += refund
 	GameState.selected_tile = Vector2i(-1, -1)
 	if iso_map.has_method("clear_selected_tile"):
 		iso_map.clear_selected_tile()
@@ -189,8 +198,8 @@ func _on_building_sell_pressed() -> void:
 		hud.show_selected_object("")
 	_hide_building_info()
 	if tile_type == GameState.TILE_TYPE_PATH or tile_type == GameState.TILE_TYPE_ATTRACTION:
-		if visitor_system.has_method("clear_visitor"):
-			visitor_system.clear_visitor()
+		if visitor_system.has_method("revalidate_active_routes"):
+			visitor_system.revalidate_active_routes()
 		_spawn_simple_visitor()
 
 
@@ -241,10 +250,18 @@ func _on_load_requested() -> void:
 
 
 func _try_build_basic_path(tile: Vector2i) -> void:
+	if not _is_area_inside_map(tile, Vector2i(1, 1)):
+		_show_error_message("Outside map")
+		return
+	if GameState.is_entrance_tile(tile):
+		_show_error_message("Entrance blocked")
+		return
 	if GameState.is_tile_used(tile):
+		_show_error_message("Tile occupied")
 		print("Tile already used: ", tile)
 		return
 	if not Economy.can_afford(BASIC_PATH_COST):
+		_show_error_message("Not enough money")
 		print("Not enough money for Basic Path")
 		return
 	if GameState.add_path_tile(tile):
@@ -257,10 +274,21 @@ func _try_build_basic_path(tile: Vector2i) -> void:
 
 
 func _try_build_basic_attraction(tile: Vector2i) -> void:
-	if not GameState.can_place_area(tile, Vector2i(2, 2)):
+	var size: Vector2i = Vector2i(2, 2)
+	if not _is_area_inside_map(tile, size):
+		_show_error_message("Outside map")
+		print("Cannot place Basic Attraction at: ", tile)
+		return
+	if _area_includes_entrance(tile, size):
+		_show_error_message("Entrance blocked")
+		print("Cannot place Basic Attraction at: ", tile)
+		return
+	if _is_area_occupied(tile, size):
+		_show_error_message("Tile occupied")
 		print("Cannot place Basic Attraction at: ", tile)
 		return
 	if not Economy.can_afford(BASIC_ATTRACTION_COST):
+		_show_error_message("Not enough money")
 		print("Not enough money for Basic Attraction")
 		return
 	if GameState.add_basic_attraction(tile):
@@ -269,7 +297,26 @@ func _try_build_basic_attraction(tile: Vector2i) -> void:
 			iso_map.refresh_tiles()
 		if hud.has_method("update_money"):
 			hud.update_money()
+		if not GameState.has_connected_basic_attraction(tile):
+			_show_error_message("Attraction needs Path")
 		_spawn_simple_visitor()
+
+
+func _is_area_inside_map(origin: Vector2i, size: Vector2i) -> bool:
+	return origin.x >= 0 and origin.y >= 0 and origin.x + size.x <= GameState.map_width and origin.y + size.y <= GameState.map_height
+
+
+func _area_includes_entrance(origin: Vector2i, size: Vector2i) -> bool:
+	var entry_tile: Vector2i = GameState.ENTRY_TILE
+	return entry_tile.x >= origin.x and entry_tile.y >= origin.y and entry_tile.x < origin.x + size.x and entry_tile.y < origin.y + size.y
+
+
+func _is_area_occupied(origin: Vector2i, size: Vector2i) -> bool:
+	for x in range(origin.x, origin.x + size.x):
+		for y in range(origin.y, origin.y + size.y):
+			if GameState.is_tile_used(Vector2i(x, y)):
+				return true
+	return false
 
 
 func _spawn_simple_visitor() -> void:

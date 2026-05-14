@@ -77,6 +77,25 @@ text = "Save"
 layout_mode = 2
 text = "Load"
 
+[node name="MessageLabel" type="Label" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -180.0
+offset_top = 64.0
+offset_right = 180.0
+offset_bottom = 92.0
+grow_horizontal = 2
+mouse_filter = 2
+text = "Message"
+horizontal_alignment = 1
+
+[node name="MessageTimer" type="Timer" parent="."]
+wait_time = 2.5
+one_shot = true
+
 [node name="StatsPanel" type="PanelContainer" parent="."]
 visible = false
 layout_mode = 1
