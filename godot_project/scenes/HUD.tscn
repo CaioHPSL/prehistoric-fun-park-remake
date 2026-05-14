@@ -1,0 +1,50 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/hud.gd" id="1_hud"]
+
+[node name="HUD" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_hud")
+
+[node name="TopBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 520.0
+offset_bottom = 56.0
+mouse_filter = 2
+
+[node name="MoneyLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+mouse_filter = 2
+text = "$1000"
+
+[node name="SelectedTileLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+mouse_filter = 2
+text = "Tile: none"
+
+[node name="BuildModeLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(100, 0)
+mouse_filter = 2
+text = "Build: none"
+
+[node name="BuildButton" type="Button" parent="TopBar"]
+layout_mode = 2
+text = "Build"
+
+[node name="SaveButton" type="Button" parent="TopBar"]
+layout_mode = 2
+text = "Save"
+
+[node name="LoadButton" type="Button" parent="TopBar"]
+layout_mode = 2
+text = "Load"

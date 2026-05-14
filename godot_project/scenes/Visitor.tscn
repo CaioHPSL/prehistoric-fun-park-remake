@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[node name="Visitor" type="Node2D"]
+
+[node name="PlaceholderShape" type="Polygon2D" parent="."]
+color = Color(0.15, 0.75, 1, 1)
+polygon = PackedVector2Array(0, -8, 6, 4, -6, 4)

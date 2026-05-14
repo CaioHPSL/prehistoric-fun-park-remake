@@ -1,0 +1,35 @@
+[gd_scene format=3]
+
+[node name="BuildingInfoPanel" type="PanelContainer"]
+visible = false
+layout_mode = 3
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -320.0
+offset_top = -170.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="Content" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Content"]
+layout_mode = 2
+text = "Building"
+
+[node name="Details" type="Label" parent="Content"]
+layout_mode = 2
+text = "No building selected."
+
+[node name="SellButton" type="Button" parent="Content"]
+layout_mode = 2
+text = "Sell"
+
+[node name="CloseButton" type="Button" parent="Content"]
+layout_mode = 2
+text = "Close"

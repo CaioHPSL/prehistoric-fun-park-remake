@@ -1,0 +1,23 @@
+{
+  "buildings": {
+    "basic_path": {
+      "name": "Basic Path",
+      "type": "path",
+      "size": [1, 1],
+      "cost": 10,
+      "sell_refund_ratio": 0.5,
+      "placeholder_color": "#b7a36a"
+    },
+    "basic_attraction": {
+      "name": "Basic Attraction",
+      "type": "attraction",
+      "size": [2, 2],
+      "cost": 250,
+      "ticket_price": 25,
+      "visitor_capacity": 1,
+      "use_duration_seconds": 3.0,
+      "sell_refund_ratio": 0.5,
+      "placeholder_color": "#b45a4a"
+    }
+  }
+}

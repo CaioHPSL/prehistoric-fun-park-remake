@@ -1,0 +1,11 @@
+﻿Prehistoric Fun Park gpack extraction summary
+Input directory: C:\Users\caioh\OneDrive\Área de Trabalho\port\prehistoric_vineflower
+Output directory: C:\Users\caioh\OneDrive\Área de Trabalho\port\assets_extracted
+
+gpack0.dat: extracted 11 images, skipped 0 entries
+gpack1.dat: extracted 12 images, skipped 1 entry
+gpack2.dat: extracted 6 images, skipped 0 entries
+gpack3.dat: extracted 6 images, skipped 0 entries
+
+Validation: all extracted PNG files have a valid PNG signature
+Log: C:\Users\caioh\OneDrive\Área de Trabalho\port\assets_extracted\extract_gpacks.log

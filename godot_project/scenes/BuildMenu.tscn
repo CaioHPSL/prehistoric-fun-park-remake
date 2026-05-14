@@ -1,0 +1,32 @@
+[gd_scene format=3]
+
+[node name="BuildMenu" type="PanelContainer"]
+visible = false
+layout_mode = 3
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -170.0
+offset_right = 300.0
+offset_bottom = -16.0
+grow_vertical = 0
+
+[node name="Items" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Items"]
+layout_mode = 2
+text = "Build"
+
+[node name="BasicPathButton" type="Button" parent="Items"]
+layout_mode = 2
+text = "Basic Path"
+
+[node name="BasicAttractionButton" type="Button" parent="Items"]
+layout_mode = 2
+text = "Basic Attraction"
+
+[node name="CancelButton" type="Button" parent="Items"]
+layout_mode = 2
+text = "Cancel"

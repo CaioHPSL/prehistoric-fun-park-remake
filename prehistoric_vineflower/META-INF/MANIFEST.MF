@@ -1,0 +1,14 @@
+Manifest-Version: 1.0
+MIDlet-Name: Prehistoric Fun Park
+MIDlet-Version: 0.1.20
+MIDlet-Vendor: THQ/Gear Games
+MIDlet-1: Prehistoric Fun Park, icon.png, Park
+MicroEdition-Profile: MIDP-2.0
+MicroEdition-Configuration: CLDC-1.0
+MIDlet-Info-URL: http://www.thqwireless.com
+Created-By: Metaflow
+Content-Folder: Games
+GameLinkEnabled: false
+
+
+

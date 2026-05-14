@@ -1,0 +1,10 @@
+{
+  "map_width": 60,
+  "map_height": 60,
+  "initial_money": 1000,
+  "basic_path_cost": 10,
+  "basic_attraction_cost": 250,
+  "basic_attraction_profit": 25,
+  "visitor_spawn_seconds": 5.0,
+  "sell_refund_ratio": 0.5
+}
