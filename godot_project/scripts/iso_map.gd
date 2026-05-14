@@ -5,6 +5,14 @@ extends Node2D
 signal tile_touched(tile: Vector2i)
 signal selection_cleared
 
+const PATH_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_002.png")
+const PATH_TEXTURE_REGION_0: Rect2 = Rect2(0.0, 104.0, 38.0, 20.0)
+const PATH_TEXTURE_REGION_1: Rect2 = Rect2(38.0, 104.0, 38.0, 20.0)
+const PATH_BORDER_REGION_A: Rect2 = Rect2(76.0, 111.0, 23.0, 13.0)
+const PATH_BORDER_REGION_B: Rect2 = Rect2(98.0, 111.0, 23.0, 13.0)
+const TERRAIN_TEXTURE: Texture2D = preload("res://assets/original_sprites/terrain/gpack2_000.png")
+const TERRAIN_TEXTURE_REGION: Rect2 = Rect2(0.0, 0.0, 38.0, 20.0)
+
 @export var map_width: int = 30
 @export var map_height: int = 30
 @export var tile_width: int = 40
@@ -149,21 +157,9 @@ func _is_build_preview_active() -> bool:
 
 
 func _draw() -> void:
-	# Temporary placeholder grid. Real sprites come later.
 	for x in range(map_width):
 		for y in range(map_height):
-			var top := tile_to_screen(Vector2i(x, y))
-			var points := PackedVector2Array([
-				top,
-				top + Vector2(tile_width * 0.5, tile_height * 0.5),
-				top + Vector2(0, tile_height),
-				top + Vector2(-tile_width * 0.5, tile_height * 0.5),
-			])
-			var outline := PackedVector2Array(points)
-			outline.append(points[0])
-			var shade := 0.02 if (x + y) % 2 == 0 else 0.0
-			draw_colored_polygon(points, Color(0.18 + shade, 0.45 + shade, 0.22 + shade, 1.0))
-			draw_polyline(outline, Color(0.08, 0.18, 0.1, 1.0), 1.0)
+			_draw_terrain_tile(Vector2i(x, y))
 
 	_draw_path_tiles()
 	_draw_attraction_tiles()
@@ -176,26 +172,58 @@ func _draw() -> void:
 		_draw_build_preview()
 
 
+func _draw_terrain_tile(tile: Vector2i) -> void:
+	var top := tile_to_screen(tile)
+	var target_rect: Rect2 = Rect2(
+		top + Vector2(tile_width * -0.5, 0.0),
+		Vector2(tile_width, tile_height)
+	)
+	# TODO: Use the other gpack2_000 terrain rows when terrain types are modeled.
+	draw_texture_rect_region(TERRAIN_TEXTURE, target_rect, TERRAIN_TEXTURE_REGION)
+
+
 func _draw_path_tiles() -> void:
 	for tile_data in GameState.tiles:
 		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_PATH:
 			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
 			if is_inside_map(tile):
-				_draw_path_tile(tile)
+				_draw_path_tile(tile, int(tile_data.get("path_variant", 0)))
 
 
-func _draw_path_tile(tile: Vector2i) -> void:
+func _draw_path_tile(tile: Vector2i, path_variant: int) -> void:
 	var top := tile_to_screen(tile)
-	var points := PackedVector2Array([
-		top,
-		top + Vector2(tile_width * 0.5, tile_height * 0.5),
-		top + Vector2(0, tile_height),
-		top + Vector2(-tile_width * 0.5, tile_height * 0.5),
-	])
-	var outline := PackedVector2Array(points)
-	outline.append(points[0])
-	draw_colored_polygon(points, Color(0.58, 0.48, 0.34, 1.0))
-	draw_polyline(outline, Color(0.31, 0.24, 0.14, 1.0), 1.5)
+	var target_rect: Rect2 = Rect2(
+		top + Vector2(tile_width * -0.5, 0.0),
+		Vector2(tile_width, tile_height)
+	)
+	draw_texture_rect_region(PATH_TEXTURE, target_rect, _get_path_texture_region(path_variant))
+	_draw_path_border_overlays(tile, target_rect.position)
+
+
+func _get_path_texture_region(path_variant: int) -> Rect2:
+	# TODO: Real path variations should come from c[][] / 4, as in the original JAR.
+	if abs(path_variant) % 2 == 1:
+		return PATH_TEXTURE_REGION_1
+	return PATH_TEXTURE_REGION_0
+
+
+func _draw_path_border_overlays(tile: Vector2i, base_position: Vector2) -> void:
+	if GameState.get_tile_type(Vector2i(tile.x, tile.y - 1)) != GameState.TILE_TYPE_PATH:
+		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(18.0, -1.0))
+	if GameState.get_tile_type(Vector2i(tile.x - 1, tile.y)) != GameState.TILE_TYPE_PATH:
+		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
+	if GameState.get_tile_type(Vector2i(tile.x, tile.y + 1)) != GameState.TILE_TYPE_PATH:
+		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(-1.0, 7.0))
+	if GameState.get_tile_type(Vector2i(tile.x + 1, tile.y)) != GameState.TILE_TYPE_PATH:
+		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
+
+
+func _draw_path_overlay(base_position: Vector2, source_region: Rect2, offset: Vector2) -> void:
+	draw_texture_rect_region(
+		PATH_TEXTURE,
+		Rect2(base_position + offset, source_region.size),
+		source_region
+	)
 
 
 func _draw_attraction_tiles() -> void:

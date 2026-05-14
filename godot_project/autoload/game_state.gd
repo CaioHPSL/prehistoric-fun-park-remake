@@ -56,6 +56,8 @@ func add_path_tile(tile: Vector2i) -> bool:
 		"x": tile.x,
 		"y": tile.y,
 		"type": TILE_TYPE_PATH,
+		"path_variant": 0,
+		"path_mask": 3,
 	})
 	return true
 
@@ -209,8 +211,18 @@ func from_save_data(data: Dictionary) -> void:
 	map_width = int(data.get("map_width", 30))
 	map_height = int(data.get("map_height", 30))
 	tiles = data.get("tiles", [])
+	_ensure_path_metadata_defaults()
 	buildings = data.get("buildings", [])
 	visitors = data.get("visitors", [])
 	Economy.money = int(data.get("money", Economy.initial_money))
 	Economy.total_earned = int(data.get("total_earned", 0))
 	Economy.total_spent = int(data.get("total_spent", 0))
+
+
+func _ensure_path_metadata_defaults() -> void:
+	for tile_data in tiles:
+		if String(tile_data.get("type", "")) == TILE_TYPE_PATH:
+			if not tile_data.has("path_variant"):
+				tile_data["path_variant"] = 0
+			if not tile_data.has("path_mask"):
+				tile_data["path_mask"] = 3
