@@ -141,6 +141,7 @@ func _draw() -> void:
 			draw_polyline(outline, Color(0.08, 0.18, 0.1, 1.0), 1.0)
 
 	_draw_path_tiles()
+	_draw_attraction_tiles()
 
 	if is_inside_map(selected_tile):
 		_draw_selected_tile()
@@ -166,6 +167,28 @@ func _draw_path_tile(tile: Vector2i) -> void:
 	outline.append(points[0])
 	draw_colored_polygon(points, Color(0.58, 0.48, 0.34, 1.0))
 	draw_polyline(outline, Color(0.31, 0.24, 0.14, 1.0), 1.5)
+
+
+func _draw_attraction_tiles() -> void:
+	for tile_data in GameState.tiles:
+		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_ATTRACTION:
+			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
+			if is_inside_map(tile):
+				_draw_attraction_tile(tile)
+
+
+func _draw_attraction_tile(tile: Vector2i) -> void:
+	var top := tile_to_screen(tile)
+	var points := PackedVector2Array([
+		top,
+		top + Vector2(tile_width * 0.5, tile_height * 0.5),
+		top + Vector2(0, tile_height),
+		top + Vector2(-tile_width * 0.5, tile_height * 0.5),
+	])
+	var outline := PackedVector2Array(points)
+	outline.append(points[0])
+	draw_colored_polygon(points, Color(0.72, 0.32, 0.2, 1.0))
+	draw_polyline(outline, Color(0.36, 0.12, 0.08, 1.0), 1.5)
 
 
 func _draw_selected_tile() -> void:

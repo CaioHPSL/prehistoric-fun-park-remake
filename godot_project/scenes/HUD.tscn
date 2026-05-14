@@ -16,7 +16,7 @@ script = ExtResource("1_hud")
 layout_mode = 1
 offset_left = 16.0
 offset_top = 16.0
-offset_right = 520.0
+offset_right = 760.0
 offset_bottom = 56.0
 mouse_filter = 2
 
@@ -25,11 +25,29 @@ layout_mode = 2
 mouse_filter = 2
 text = "$1000"
 
+[node name="EarnedLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(100, 0)
+mouse_filter = 2
+text = "Earned: $0"
+
+[node name="SpentLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(95, 0)
+mouse_filter = 2
+text = "Spent: $0"
+
 [node name="SelectedTileLabel" type="Label" parent="TopBar"]
 layout_mode = 2
 custom_minimum_size = Vector2(120, 0)
 mouse_filter = 2
 text = "Tile: none"
+
+[node name="SelectedObjectLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(140, 0)
+mouse_filter = 2
+text = "Selected: none"
 
 [node name="BuildModeLabel" type="Label" parent="TopBar"]
 layout_mode = 2
@@ -37,9 +55,19 @@ custom_minimum_size = Vector2(100, 0)
 mouse_filter = 2
 text = "Build: none"
 
+[node name="VisitorLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(160, 0)
+mouse_filter = 2
+text = "Visitors: 0/3 Served: 0"
+
 [node name="BuildButton" type="Button" parent="TopBar"]
 layout_mode = 2
 text = "Build"
+
+[node name="StatsButton" type="Button" parent="TopBar"]
+layout_mode = 2
+text = "Stats"
 
 [node name="SaveButton" type="Button" parent="TopBar"]
 layout_mode = 2
@@ -48,3 +76,26 @@ text = "Save"
 [node name="LoadButton" type="Button" parent="TopBar"]
 layout_mode = 2
 text = "Load"
+
+[node name="StatsPanel" type="PanelContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -260.0
+offset_top = 72.0
+offset_right = -16.0
+offset_bottom = 220.0
+grow_horizontal = 0
+
+[node name="Content" type="VBoxContainer" parent="StatsPanel"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="StatsPanel/Content"]
+layout_mode = 2
+text = "Stats"
+
+[node name="StatsDetails" type="Label" parent="StatsPanel/Content"]
+layout_mode = 2
+text = "Money: $1000\nEarned total: $0\nSpent total: $0\nVisitors active: 0\nServed total: 0"
