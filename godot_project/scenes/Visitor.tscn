@@ -6,6 +6,6 @@
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 texture = ExtResource("1_visitor_texture")
-offset = Vector2(0, -11)
+offset = Vector2(0, -8)
 region_enabled = true
-region_rect = Rect2(0, 0, 14, 22)
+region_rect = Rect2(0, 0, 8, 16)

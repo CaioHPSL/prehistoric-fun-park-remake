@@ -6,12 +6,25 @@ signal tile_touched(tile: Vector2i)
 signal selection_cleared
 
 const PATH_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_002.png")
+const ENTRANCE_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_006.png")
 const PATH_TEXTURE_REGION_0: Rect2 = Rect2(0.0, 104.0, 38.0, 20.0)
 const PATH_TEXTURE_REGION_1: Rect2 = Rect2(38.0, 104.0, 38.0, 20.0)
 const PATH_BORDER_REGION_A: Rect2 = Rect2(76.0, 111.0, 23.0, 13.0)
 const PATH_BORDER_REGION_B: Rect2 = Rect2(98.0, 111.0, 23.0, 13.0)
+const EXTERNAL_WALL_REGION_A: Rect2 = Rect2(0.0, 28.0, 27.0, 20.0)
+const EXTERNAL_WALL_REGION_B: Rect2 = Rect2(0.0, 48.0, 27.0, 20.0)
+const EXTERNAL_CORNER_REGION_A: Rect2 = Rect2(27.0, 29.0, 21.0, 17.0)
+const EXTERNAL_CORNER_REGION_B: Rect2 = Rect2(27.0, 46.0, 20.0, 17.0)
+const ENTRANCE_ROCK_REGION: Rect2 = Rect2(0.0, 112.0, 15.0, 12.0)
+const ENTRANCE_SIGN_REGION_A: Rect2 = Rect2(90.0, 83.0, 15.0, 20.0)
+const ENTRANCE_SIGN_REGION_B: Rect2 = Rect2(105.0, 84.0, 18.0, 13.0)
 const TERRAIN_TEXTURE: Texture2D = preload("res://assets/original_sprites/terrain/gpack2_000.png")
-const TERRAIN_TEXTURE_REGION: Rect2 = Rect2(0.0, 0.0, 38.0, 20.0)
+const TERRAIN_TEXTURE_REGIONS: Array[Rect2] = [
+	Rect2(0.0, 0.0, 38.0, 20.0),
+	Rect2(0.0, 20.0, 38.0, 20.0),
+	Rect2(0.0, 40.0, 38.0, 20.0),
+]
+const TERRAIN_BASE_COLOR: Color = Color(0.27, 0.53, 0.16, 1.0)
 
 @export var map_width: int = 30
 @export var map_height: int = 30
@@ -27,6 +40,10 @@ var _press_moved := false
 var _active_touch_index := -1
 
 
+func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+
 func configure(width: int, height: int) -> void:
 	map_width = width
 	map_height = height
@@ -35,8 +52,8 @@ func configure(width: int, height: int) -> void:
 
 func tile_to_screen(tile: Vector2i) -> Vector2:
 	return Vector2(
-		(tile.x - tile.y) * tile_width * 0.5,
-		(tile.x + tile.y) * tile_height * 0.5
+		(tile.x + tile.y) * tile_width * 0.5,
+		(tile.x - tile.y) * tile_height * 0.5
 	)
 
 
@@ -45,8 +62,11 @@ func screen_to_tile(screen_position: Vector2) -> Vector2i:
 	var local_position: Vector2 = to_local(canvas_position)
 	var half_width: float = tile_width * 0.5
 	var half_height: float = tile_height * 0.5
-	var tile_x: int = int(floor((local_position.x / half_width + local_position.y / half_height) * 0.5))
-	var tile_y: int = int(floor((local_position.y / half_height - local_position.x / half_width) * 0.5))
+	var anchored_position: Vector2 = local_position - Vector2(0.0, half_height)
+	var iso_x: float = anchored_position.x / half_width
+	var iso_y: float = anchored_position.y / half_height
+	var tile_x: int = int(floor(((iso_x + iso_y) * 0.5) + 0.5))
+	var tile_y: int = int(floor(((iso_x - iso_y) * 0.5) + 0.5))
 	return Vector2i(tile_x, tile_y)
 
 
@@ -157,10 +177,13 @@ func _is_build_preview_active() -> bool:
 
 
 func _draw() -> void:
+	_draw_external_ground()
 	for x in range(map_width):
 		for y in range(map_height):
 			_draw_terrain_tile(Vector2i(x, y))
 
+	_draw_external_road()
+	_draw_external_border()
 	_draw_path_tiles()
 	_draw_attraction_tiles()
 	_draw_entrance()
@@ -174,12 +197,75 @@ func _draw() -> void:
 
 func _draw_terrain_tile(tile: Vector2i) -> void:
 	var top := tile_to_screen(tile)
+	var source_region: Rect2 = _get_terrain_texture_region(tile)
+	var terrain_points := PackedVector2Array([
+		top,
+		top + Vector2(tile_width * 0.5, tile_height * 0.5),
+		top + Vector2(0.0, tile_height),
+		top + Vector2(tile_width * -0.5, tile_height * 0.5),
+	])
+	draw_colored_polygon(terrain_points, TERRAIN_BASE_COLOR)
 	var target_rect: Rect2 = Rect2(
-		top + Vector2(tile_width * -0.5, 0.0),
-		Vector2(tile_width, tile_height)
+		(top + Vector2(tile_width * -0.5, 0.0)).round(),
+		source_region.size
 	)
-	# TODO: Use the other gpack2_000 terrain rows when terrain types are modeled.
-	draw_texture_rect_region(TERRAIN_TEXTURE, target_rect, TERRAIN_TEXTURE_REGION)
+	draw_texture_rect_region(TERRAIN_TEXTURE, target_rect, source_region)
+
+
+func _get_terrain_texture_region(tile: Vector2i) -> Rect2:
+	var terrain_code: int = GameState.get_terrain_code(tile)
+	return TERRAIN_TEXTURE_REGIONS[terrain_code - 1]
+
+
+func _draw_external_ground() -> void:
+	for x in range(-1, map_width + 1):
+		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(x, -1), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
+		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(x, map_height), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
+	for y in range(0, map_height):
+		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(-1, y), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
+		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(map_width, y), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
+
+
+func _draw_external_road() -> void:
+	var entry_tile: Vector2i = GameState.ENTRY_TILE
+	var road_tiles: Array[Vector2i] = [
+		entry_tile,
+		Vector2i(entry_tile.x, -1),
+		Vector2i(entry_tile.x, -2),
+	]
+	for road_tile in road_tiles:
+		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_TEXTURE_REGION_0, Vector2.ZERO)
+		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
+		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
+
+
+func _draw_external_border() -> void:
+	var entry_tile: Vector2i = GameState.ENTRY_TILE
+	for x in range(0, map_width):
+		if x != entry_tile.x:
+			_draw_external_tile(PATH_TEXTURE, Vector2i(x, -1), EXTERNAL_WALL_REGION_B, Vector2(3.0, -3.0))
+		_draw_external_tile(PATH_TEXTURE, Vector2i(x, map_height), EXTERNAL_WALL_REGION_B, Vector2(1.0, -1.0))
+	for y in range(0, map_height):
+		_draw_external_tile(PATH_TEXTURE, Vector2i(-1, y), EXTERNAL_WALL_REGION_A, Vector2(13.0, -2.0))
+		_draw_external_tile(PATH_TEXTURE, Vector2i(map_width, y), EXTERNAL_WALL_REGION_A, Vector2(11.0, -3.0))
+	_draw_external_corner(Vector2i(-1, -1), EXTERNAL_CORNER_REGION_A, Vector2(19.0, -3.0), EXTERNAL_CORNER_REGION_B, Vector2(17.0, 4.0))
+	_draw_external_corner(Vector2i(map_width, -1), EXTERNAL_CORNER_REGION_B, Vector2(3.0, -4.0), EXTERNAL_CORNER_REGION_A, Vector2(16.0, -4.0))
+	_draw_external_corner(Vector2i(-1, map_height), EXTERNAL_CORNER_REGION_A, Vector2(5.0, 5.0), EXTERNAL_CORNER_REGION_B, Vector2(13.0, 5.0))
+	_draw_external_corner(Vector2i(map_width, map_height), EXTERNAL_CORNER_REGION_B, Vector2(-1.0, -2.0), EXTERNAL_CORNER_REGION_A, Vector2(3.0, 3.0))
+
+
+func _draw_external_corner(tile: Vector2i, first_region: Rect2, first_offset: Vector2, second_region: Rect2, second_offset: Vector2) -> void:
+	_draw_external_tile(PATH_TEXTURE, tile, first_region, first_offset)
+	_draw_external_tile(PATH_TEXTURE, tile, second_region, second_offset)
+
+
+func _draw_external_tile(texture: Texture2D, tile: Vector2i, source_region: Rect2, offset: Vector2) -> void:
+	var top: Vector2 = tile_to_screen(tile)
+	var target_rect: Rect2 = Rect2(
+		top + Vector2(tile_width * -0.5, 0.0) + offset,
+		source_region.size
+	)
+	draw_texture_rect_region(texture, target_rect, source_region)
 
 
 func _draw_path_tiles() -> void:
@@ -208,14 +294,18 @@ func _get_path_texture_region(path_variant: int) -> Rect2:
 
 
 func _draw_path_border_overlays(tile: Vector2i, base_position: Vector2) -> void:
-	if GameState.get_tile_type(Vector2i(tile.x, tile.y - 1)) != GameState.TILE_TYPE_PATH:
+	if not _is_path_visually_connected(Vector2i(tile.x, tile.y + 1)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(18.0, -1.0))
-	if GameState.get_tile_type(Vector2i(tile.x - 1, tile.y)) != GameState.TILE_TYPE_PATH:
+	if not _is_path_visually_connected(Vector2i(tile.x - 1, tile.y)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
-	if GameState.get_tile_type(Vector2i(tile.x, tile.y + 1)) != GameState.TILE_TYPE_PATH:
+	if not _is_path_visually_connected(Vector2i(tile.x, tile.y - 1)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(-1.0, 7.0))
-	if GameState.get_tile_type(Vector2i(tile.x + 1, tile.y)) != GameState.TILE_TYPE_PATH:
+	if not _is_path_visually_connected(Vector2i(tile.x + 1, tile.y)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
+
+
+func _is_path_visually_connected(tile: Vector2i) -> bool:
+	return GameState.get_tile_type(tile) == GameState.TILE_TYPE_PATH or GameState.is_entrance_tile(tile)
 
 
 func _draw_path_overlay(base_position: Vector2, source_region: Rect2, offset: Vector2) -> void:
@@ -252,21 +342,16 @@ func _draw_entrance() -> void:
 	var tile: Vector2i = GameState.ENTRY_TILE
 	if not is_inside_map(tile):
 		return
-	var top := tile_to_screen(tile)
-	var points := PackedVector2Array([
-		top,
-		top + Vector2(tile_width * 0.5, tile_height * 0.5),
-		top + Vector2(0, tile_height),
-		top + Vector2(-tile_width * 0.5, tile_height * 0.5),
-	])
-	var outline := PackedVector2Array(points)
-	outline.append(points[0])
-	draw_colored_polygon(points, Color(0.2, 0.28, 0.36, 1.0))
-	draw_polyline(outline, Color(0.8, 0.9, 1.0, 1.0), 2.0)
-	draw_rect(Rect2(top + Vector2(-16, -18), Vector2(4, 25)), Color(0.55, 0.34, 0.18, 1.0))
-	draw_rect(Rect2(top + Vector2(12, -18), Vector2(4, 25)), Color(0.55, 0.34, 0.18, 1.0))
-	draw_line(top + Vector2(-16, -18), top + Vector2(16, -18), Color(0.85, 0.72, 0.38, 1.0), 4.0)
-	draw_string(ThemeDB.fallback_font, top + Vector2(-35, -25), "WELCOME", HORIZONTAL_ALIGNMENT_CENTER, 70.0, 10, Color(1.0, 0.95, 0.75, 1.0))
+	var left_tile: Vector2i = Vector2i(tile.x - 1, -1)
+	var right_tile: Vector2i = Vector2i(tile.x + 1, -1)
+	_draw_external_tile(ENTRANCE_TEXTURE, left_tile, ENTRANCE_ROCK_REGION, Vector2(14.0, -2.0))
+	_draw_external_tile(ENTRANCE_TEXTURE, left_tile, ENTRANCE_ROCK_REGION, Vector2(15.0, -8.0))
+	_draw_external_tile(ENTRANCE_TEXTURE, left_tile, ENTRANCE_ROCK_REGION, Vector2(17.0, -14.0))
+	_draw_external_tile(ENTRANCE_TEXTURE, right_tile, ENTRANCE_ROCK_REGION, Vector2(4.0, -7.0))
+	_draw_external_tile(ENTRANCE_TEXTURE, right_tile, ENTRANCE_ROCK_REGION, Vector2(3.0, -15.0))
+	_draw_external_tile(ENTRANCE_TEXTURE, right_tile, ENTRANCE_ROCK_REGION, Vector2(2.0, -23.0))
+	_draw_external_tile(PATH_TEXTURE, right_tile, ENTRANCE_SIGN_REGION_A, Vector2(-19.0, -44.0))
+	_draw_external_tile(PATH_TEXTURE, right_tile, ENTRANCE_SIGN_REGION_B, Vector2(-4.0, -33.0))
 
 
 func _draw_selected_tile() -> void:

@@ -6,6 +6,14 @@ signal visitor_paid(amount: int)
 signal visitor_stats_changed(active_count: int, served_count: int)
 
 const VISITOR_PAYOUT: int = 25
+const VISITOR_ANIMATION_FRAME_TIME: float = 0.14
+const VISITOR_WALK_SEQUENCE: Array[int] = [0, 1, 0, 2]
+const VISITOR_FRAME_COLUMNS: Array[Rect2] = [
+	Rect2(0.0, 0.0, 8.0, 16.0),
+	Rect2(8.0, 0.0, 9.0, 16.0),
+	Rect2(17.0, 0.0, 11.0, 16.0),
+]
+const VISITOR_FRAME_HEIGHT: float = 16.0
 
 @export var visitor_scene: PackedScene
 @export var move_speed: float = 80.0
@@ -40,7 +48,9 @@ func _process(delta: float) -> void:
 			_emit_visitor_stats()
 			continue
 		var visitor_target_position: Vector2 = visitor.get_meta("target_position", Vector2.ZERO) as Vector2
+		var is_moving: bool = visitor.position.distance_to(visitor_target_position) > 1.0
 		visitor.position = visitor.position.move_toward(visitor_target_position, move_speed * delta)
+		_update_visitor_animation(visitor, delta, is_moving)
 		if visitor.position.distance_to(visitor_target_position) <= 1.0:
 			_advance_visitor_route(visitor)
 
@@ -130,7 +140,9 @@ func _create_visitor() -> Node2D:
 	if visitor_scene != null:
 		var instance: Node = visitor_scene.instantiate()
 		if instance is Node2D:
-			return instance as Node2D
+			var scene_visitor: Node2D = instance as Node2D
+			_reset_visitor_animation(scene_visitor)
+			return scene_visitor
 		instance.queue_free()
 	var visitor: Node2D = Node2D.new()
 	var shape: Polygon2D = Polygon2D.new()
@@ -138,6 +150,43 @@ func _create_visitor() -> Node2D:
 	shape.polygon = PackedVector2Array([Vector2(0, -8), Vector2(6, 4), Vector2(-6, 4)])
 	visitor.add_child(shape)
 	return visitor
+
+
+func _update_visitor_animation(visitor: Node2D, delta: float, is_moving: bool) -> void:
+	var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
+	if sprite == null:
+		return
+	if not is_moving:
+		_reset_visitor_animation(visitor)
+		return
+	var animation_time: float = float(visitor.get_meta("animation_time", 0.0)) + delta
+	var sequence_index: int = int(visitor.get_meta("animation_index", 0))
+	while animation_time >= VISITOR_ANIMATION_FRAME_TIME:
+		animation_time -= VISITOR_ANIMATION_FRAME_TIME
+		sequence_index = (sequence_index + 1) % VISITOR_WALK_SEQUENCE.size()
+	visitor.set_meta("animation_time", animation_time)
+	visitor.set_meta("animation_index", sequence_index)
+	sprite.region_rect = _get_visitor_frame_region(
+		int(visitor.get_meta("visual_direction", 0)),
+		VISITOR_WALK_SEQUENCE[sequence_index]
+	)
+
+
+func _reset_visitor_animation(visitor: Node2D) -> void:
+	visitor.set_meta("animation_time", 0.0)
+	visitor.set_meta("animation_index", 0)
+	var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
+	if sprite != null:
+		sprite.region_rect = _get_visitor_frame_region(int(visitor.get_meta("visual_direction", 0)), 0)
+
+
+func _get_visitor_frame_region(direction: int, frame: int) -> Rect2:
+	var clamped_direction: int = clampi(direction, 0, 3)
+	var source_region: Rect2 = VISITOR_FRAME_COLUMNS[frame]
+	return Rect2(
+		source_region.position + Vector2(0.0, VISITOR_FRAME_HEIGHT * clamped_direction),
+		source_region.size
+	)
 
 
 func _tile_to_local_position(tile: Vector2i) -> Vector2:
@@ -223,9 +272,23 @@ func _set_next_step_to_entry(visitor: Node2D, current_tile: Vector2i) -> bool:
 func _set_next_tile(visitor: Node2D, next_tile: Vector2i) -> bool:
 	if not _can_stand_on_tile(next_tile):
 		return false
+	var current_tile: Vector2i = visitor.get_meta("current_tile", GameState.ENTRY_TILE) as Vector2i
+	_update_visitor_direction(visitor, next_tile - current_tile)
 	visitor.set_meta("target_tile", next_tile)
 	visitor.set_meta("target_position", _tile_to_local_position(next_tile))
 	return true
+
+
+func _update_visitor_direction(visitor: Node2D, delta: Vector2i) -> void:
+	if delta == Vector2i(0, -1):
+		visitor.set_meta("visual_direction", 0)
+	elif delta == Vector2i(1, 0):
+		visitor.set_meta("visual_direction", 1)
+	elif delta == Vector2i(-1, 0):
+		visitor.set_meta("visual_direction", 2)
+	elif delta == Vector2i(0, 1):
+		visitor.set_meta("visual_direction", 3)
+	_reset_visitor_animation(visitor)
 
 
 func _find_reachable_attraction_origin() -> Vector2i:

@@ -7,6 +7,7 @@ const BASIC_ATTRACTION_COST: int = 250
 
 @onready var iso_map: Node = $IsoMap
 @onready var visitor_system: Node = $VisitorSystem
+@onready var camera_2d: Camera2D = $Camera2D
 @onready var hud: Control = $UI/HUD
 @onready var build_menu: Control = $UI/BuildMenu
 @onready var building_info_panel: Control = $UI/BuildingInfoPanel
@@ -23,6 +24,7 @@ func _ready() -> void:
 	GameState.reset_session()
 	if iso_map.has_method("configure"):
 		iso_map.configure(GameState.map_width, GameState.map_height)
+	_focus_camera_on_entry()
 	if iso_map.has_signal("tile_touched"):
 		iso_map.tile_touched.connect(_on_tile_touched)
 	if iso_map.has_signal("selection_cleared"):
@@ -226,6 +228,7 @@ func _on_load_requested() -> void:
 	GameState.selected_tile = Vector2i(-1, -1)
 	if iso_map.has_method("configure"):
 		iso_map.configure(GameState.map_width, GameState.map_height)
+	_focus_camera_on_entry()
 	if iso_map.has_method("clear_selected_tile"):
 		iso_map.clear_selected_tile()
 	if iso_map.has_method("refresh_tiles"):
@@ -322,6 +325,17 @@ func _is_area_occupied(origin: Vector2i, size: Vector2i) -> bool:
 func _spawn_simple_visitor() -> void:
 	if visitor_system.has_method("spawn_single_visitor"):
 		visitor_system.spawn_single_visitor()
+
+
+func _focus_camera_on_entry() -> void:
+	if not iso_map.has_method("tile_to_screen"):
+		return
+	var entry_position: Vector2 = iso_map.call("tile_to_screen", GameState.ENTRY_TILE)
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var desired_screen_position: Vector2 = Vector2(viewport_size.x * 0.22, viewport_size.y * 0.78)
+	var viewport_center: Vector2 = viewport_size * 0.5
+	var zoom_value: float = maxf(camera_2d.zoom.x, 0.001)
+	camera_2d.position = entry_position - (desired_screen_position - viewport_center) / zoom_value
 
 
 func _on_visitor_paid(amount: int) -> void:
