@@ -20,6 +20,7 @@ var visitors: Array = []
 
 
 func reset_session() -> void:
+	Economy.reset()
 	current_mode = "select"
 	selected_tile = Vector2i(-1, -1)
 	selected_catalog_id = ""
@@ -77,11 +78,14 @@ func add_path_tile(tile: Vector2i) -> bool:
 
 
 func remove_path_tile(tile: Vector2i) -> bool:
+	if is_tile_reserved(tile):
+		return false
 	for i in range(tiles.size() - 1, -1, -1):
 		var tile_data: Dictionary = tiles[i]
 		if int(tile_data.get("x", -1)) == tile.x and int(tile_data.get("y", -1)) == tile.y:
 			if String(tile_data.get("type", "")) == TILE_TYPE_PATH:
 				tiles.remove_at(i)
+				_set_random_terrain_code(tile)
 				return true
 	return false
 
@@ -226,6 +230,7 @@ func from_save_data(data: Dictionary) -> void:
 	map_width = int(data.get("map_width", 30))
 	map_height = int(data.get("map_height", 30))
 	tiles = data.get("tiles", [])
+	_remove_reserved_path_tiles()
 	_migrate_legacy_entry_path()
 	_ensure_path_metadata_defaults()
 	var saved_terrain_codes: Variant = data.get("terrain_codes", [])
@@ -247,6 +252,14 @@ func _ensure_path_metadata_defaults() -> void:
 				tile_data["path_variant"] = 0
 			if not tile_data.has("path_mask"):
 				tile_data["path_mask"] = 3
+
+
+func _remove_reserved_path_tiles() -> void:
+	for i in range(tiles.size() - 1, -1, -1):
+		var tile_data: Dictionary = tiles[i]
+		var tile: Vector2i = Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
+		if is_tile_reserved(tile) and String(tile_data.get("type", "")) == TILE_TYPE_PATH:
+			tiles.remove_at(i)
 
 
 func _migrate_legacy_entry_path() -> void:
@@ -295,6 +308,14 @@ func _ensure_terrain_codes() -> void:
 			row.append(terrain_code)
 		next_terrain_codes.append(row)
 	terrain_codes = next_terrain_codes
+
+
+func _set_random_terrain_code(tile: Vector2i) -> void:
+	if tile.x < 0 or tile.y < 0 or tile.x >= map_width or tile.y >= map_height:
+		return
+	_ensure_terrain_codes()
+	var row: Array = terrain_codes[tile.y] as Array
+	row[tile.x] = randi_range(1, 3)
 
 
 func _get_default_terrain_code(tile: Vector2i) -> int:

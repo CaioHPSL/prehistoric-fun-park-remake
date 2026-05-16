@@ -1,7 +1,7 @@
 {
   "map_width": 30,
   "map_height": 30,
-  "initial_money": 1000,
+  "initial_money": 2000,
   "basic_path_cost": 10,
   "basic_attraction_cost": 250,
   "basic_attraction_profit": 25,

@@ -2,7 +2,7 @@ extends Node
 
 # Shared economy state for the first playable version.
 
-var initial_money: int = 1000
+var initial_money: int = 2000
 var money: int = initial_money
 var total_earned: int = 0
 var total_spent: int = 0

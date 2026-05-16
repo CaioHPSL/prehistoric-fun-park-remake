@@ -15,6 +15,7 @@ const EXTERNAL_WALL_REGION_A: Rect2 = Rect2(0.0, 28.0, 27.0, 20.0)
 const EXTERNAL_WALL_REGION_B: Rect2 = Rect2(0.0, 48.0, 27.0, 20.0)
 const EXTERNAL_CORNER_REGION_A: Rect2 = Rect2(27.0, 29.0, 21.0, 17.0)
 const EXTERNAL_CORNER_REGION_B: Rect2 = Rect2(27.0, 46.0, 20.0, 17.0)
+const EXTERNAL_ENTRY_ROAD_LENGTH: int = 6
 const ENTRANCE_ROCK_REGION: Rect2 = Rect2(0.0, 112.0, 15.0, 12.0)
 const ENTRANCE_SIGN_REGION_A: Rect2 = Rect2(90.0, 83.0, 15.0, 20.0)
 const ENTRANCE_SIGN_REGION_B: Rect2 = Rect2(105.0, 84.0, 18.0, 13.0)
@@ -228,11 +229,9 @@ func _draw_external_ground() -> void:
 
 func _draw_external_road() -> void:
 	var entry_tile: Vector2i = GameState.ENTRY_TILE
-	var road_tiles: Array[Vector2i] = [
-		entry_tile,
-		Vector2i(entry_tile.x, -1),
-		Vector2i(entry_tile.x, -2),
-	]
+	var road_tiles: Array[Vector2i] = [entry_tile]
+	for road_y in range(-1, -EXTERNAL_ENTRY_ROAD_LENGTH - 1, -1):
+		road_tiles.append(Vector2i(entry_tile.x, road_y))
 	for road_tile in road_tiles:
 		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_TEXTURE_REGION_0, Vector2.ZERO)
 		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
