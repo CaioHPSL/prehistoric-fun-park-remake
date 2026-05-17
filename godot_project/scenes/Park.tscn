@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/park_controller.gd" id="1_controller"]
 [ext_resource type="PackedScene" path="res://scenes/IsoMap.tscn" id="2_isomap"]
@@ -8,6 +8,8 @@
 [ext_resource type="PackedScene" path="res://scenes/BuildingInfoPanel.tscn" id="6_info_panel"]
 [ext_resource type="Script" path="res://scripts/visitor_system.gd" id="7_visitors"]
 [ext_resource type="PackedScene" path="res://scenes/Visitor.tscn" id="8_visitor"]
+[ext_resource type="Script" path="res://scripts/entrance_overlay.gd" id="9_entrance_overlay"]
+[ext_resource type="Script" path="res://scripts/fps_counter.gd" id="10_fps_counter"]
 
 [node name="Park" type="Node2D"]
 script = ExtResource("1_controller")
@@ -17,6 +19,10 @@ script = ExtResource("1_controller")
 [node name="VisitorSystem" type="Node2D" parent="."]
 script = ExtResource("7_visitors")
 visitor_scene = ExtResource("8_visitor")
+
+[node name="EntranceOverlay" type="Node2D" parent="."]
+z_index = 10
+script = ExtResource("9_entrance_overlay")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 script = ExtResource("3_camera")
@@ -30,3 +36,15 @@ zoom = Vector2(1, 1)
 [node name="BuildMenu" parent="UI" instance=ExtResource("5_build_menu")]
 
 [node name="BuildingInfoPanel" parent="UI" instance=ExtResource("6_info_panel")]
+
+[node name="DebugOverlay" type="CanvasLayer" parent="."]
+layer = 100
+script = ExtResource("10_fps_counter")
+
+[node name="FPSLabel" type="Label" parent="DebugOverlay"]
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 96.0
+offset_bottom = 31.0
+mouse_filter = 2
+text = "FPS: --"

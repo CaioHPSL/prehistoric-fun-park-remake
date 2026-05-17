@@ -17,6 +17,9 @@ const PATH_GRAVEL_META: int = 0
 const PATH_STONE_VARIANT: int = 1
 const PATH_STONE_MASK: int = 0
 const PATH_STONE_META: int = 4
+const PATH_BENCH_MASK_C1: int = 1
+const PATH_BENCH_MASK_C2: int = 2
+const PATH_BENCH_DEFAULT_MASK: int = PATH_BENCH_MASK_C2
 const BASIC_ATTRACTION_SIZE: Vector2i = Vector2i(3, 3)
 const BASIC_ATTRACTION_JAR_TYPE: int = 6
 
@@ -25,6 +28,7 @@ var map_height: int = DEFAULT_MAP_HEIGHT
 var current_mode: String = "select"
 var selected_tile: Vector2i = Vector2i(-1, -1)
 var selected_catalog_id: String = ""
+var selected_path_addon_mask: int = PATH_BENCH_DEFAULT_MASK
 var tiles: Array = []
 var terrain_codes: Array = []
 var terrain_decor_codes: Array = []
@@ -39,6 +43,7 @@ func reset_session() -> void:
 	current_mode = "select"
 	selected_tile = Vector2i(-1, -1)
 	selected_catalog_id = ""
+	selected_path_addon_mask = PATH_BENCH_DEFAULT_MASK
 	tiles = []
 	_generate_terrain_codes()
 	_generate_terrain_decor_codes()
@@ -110,6 +115,8 @@ func is_tile_reserved(tile: Vector2i) -> bool:
 func add_path_tile(tile: Vector2i, path_variant: int = PATH_GRAVEL_VARIANT, path_mask: int = PATH_GRAVEL_MASK) -> bool:
 	if not is_inside_map(tile) or is_tile_used(tile) or is_tile_reserved(tile):
 		return false
+	if _has_adjacent_path_addon_conflict(tile):
+		return false
 	clear_terrain_decor(tile)
 	var path_meta: int = _compose_path_meta(path_variant, path_mask)
 	tiles.append({
@@ -124,14 +131,62 @@ func add_path_tile(tile: Vector2i, path_variant: int = PATH_GRAVEL_VARIANT, path
 
 
 func add_water_tile(tile: Vector2i) -> bool:
-	if not is_inside_map(tile) or is_tile_used(tile) or is_tile_reserved(tile):
+	if not is_inside_map(tile) or is_tile_reserved(tile):
+		return false
+	var path_index: int = _find_tile_index(tile, TILE_TYPE_PATH)
+	if path_index < 0:
 		return false
 	clear_terrain_decor(tile)
+	tiles.remove_at(path_index)
 	tiles.append({
 		"x": tile.x,
 		"y": tile.y,
 		"type": TILE_TYPE_WATER,
 	})
+	return true
+
+
+func can_upgrade_path_tile(tile: Vector2i, path_variant: int) -> bool:
+	if not is_inside_map(tile) or is_tile_reserved(tile):
+		return false
+	if _find_tile_index(tile, TILE_TYPE_PATH) < 0:
+		return false
+	if _has_adjacent_path_addon_conflict(tile):
+		return false
+	return path_variant > get_path_variant_at(tile)
+
+
+func upgrade_path_tile(tile: Vector2i, path_variant: int) -> bool:
+	if not can_upgrade_path_tile(tile, path_variant):
+		return false
+	var tile_index: int = _find_tile_index(tile, TILE_TYPE_PATH)
+	var tile_data: Dictionary = tiles[tile_index]
+	_set_path_metadata(tile_data, path_variant, get_path_mask_at(tile))
+	return true
+
+
+func can_add_path_addon(tile: Vector2i, path_mask_bit: int) -> bool:
+	if path_mask_bit != PATH_BENCH_MASK_C1 and path_mask_bit != PATH_BENCH_MASK_C2:
+		return false
+	if not is_inside_map(tile) or is_tile_reserved(tile):
+		return false
+	var tile_index: int = _find_tile_index(tile, TILE_TYPE_PATH)
+	if tile_index < 0:
+		return false
+	var path_mask: int = get_path_mask_at(tile)
+	if not _is_path_addon_side_clear(tile, path_mask_bit):
+		return false
+	return (path_mask & path_mask_bit) == 0
+
+
+func add_path_addon(tile: Vector2i, path_mask_bit: int) -> bool:
+	if not can_add_path_addon(tile, path_mask_bit):
+		return false
+	var tile_index: int = _find_tile_index(tile, TILE_TYPE_PATH)
+	var tile_data: Dictionary = tiles[tile_index]
+	var path_variant: int = get_path_variant_at(tile)
+	var path_mask: int = get_path_mask_at(tile) | path_mask_bit
+	_set_path_metadata(tile_data, path_variant, path_mask)
 	return true
 
 
@@ -142,10 +197,9 @@ func remove_path_tile(tile: Vector2i) -> bool:
 		var tile_data: Dictionary = tiles[i]
 		if int(tile_data.get("x", -1)) == tile.x and int(tile_data.get("y", -1)) == tile.y:
 			if String(tile_data.get("type", "")) == TILE_TYPE_PATH:
-				var path_mask: int = int(tile_data.get("path_mask", PATH_GRAVEL_MASK))
+				var path_mask: int = get_path_mask_at(tile)
 				if path_mask != 0:
-					tile_data["path_mask"] = PATH_GRAVEL_MASK
-					tile_data["path_meta"] = _compose_path_meta(int(tile_data.get("path_variant", PATH_GRAVEL_VARIANT)), PATH_GRAVEL_MASK)
+					_set_path_metadata(tile_data, get_path_variant_at(tile), PATH_GRAVEL_MASK)
 					return true
 				tiles.remove_at(i)
 				clear_terrain_decor(tile)
@@ -173,6 +227,26 @@ func has_water_tiles() -> bool:
 		if String(tile_data.get("type", "")) == TILE_TYPE_WATER:
 			return true
 	return false
+
+
+func get_path_variant_at(tile: Vector2i) -> int:
+	var tile_index: int = _find_tile_index(tile, TILE_TYPE_PATH)
+	if tile_index < 0:
+		return PATH_GRAVEL_VARIANT
+	var tile_data: Dictionary = tiles[tile_index]
+	if tile_data.has("path_meta"):
+		return _path_variant_from_meta(int(tile_data.get("path_meta", PATH_GRAVEL_META)))
+	return maxi(0, int(tile_data.get("path_variant", PATH_GRAVEL_VARIANT)))
+
+
+func get_path_mask_at(tile: Vector2i) -> int:
+	var tile_index: int = _find_tile_index(tile, TILE_TYPE_PATH)
+	if tile_index < 0:
+		return PATH_GRAVEL_MASK
+	var tile_data: Dictionary = tiles[tile_index]
+	if tile_data.has("path_mask"):
+		return clampi(int(tile_data.get("path_mask", PATH_GRAVEL_MASK)), 0, 3)
+	return _path_mask_from_meta(int(tile_data.get("path_meta", PATH_GRAVEL_META)))
 
 
 func can_place_area(origin: Vector2i, size: Vector2i) -> bool:
@@ -356,9 +430,7 @@ func _ensure_path_metadata_defaults() -> void:
 					path_mask = PATH_GRAVEL_MASK
 				path_mask = clampi(path_mask, 0, 3)
 				path_meta = _compose_path_meta(path_variant, path_mask)
-			tile_data["path_meta"] = path_meta
-			tile_data["path_variant"] = _path_variant_from_meta(path_meta)
-			tile_data["path_mask"] = _path_mask_from_meta(path_meta)
+			_set_path_metadata(tile_data, _path_variant_from_meta(path_meta), _path_mask_from_meta(path_meta))
 
 
 func _remove_reserved_path_tiles() -> void:
@@ -404,7 +476,7 @@ func _generate_terrain_codes() -> void:
 	for y in range(map_height):
 		var row: Array = []
 		for x in range(map_width):
-			row.append(_get_default_terrain_code(Vector2i(x, y)))
+			row.append(randi_range(1, 3))
 		terrain_codes.append(row)
 
 
@@ -476,6 +548,32 @@ func _path_variant_from_meta(path_meta: int) -> int:
 
 func _path_mask_from_meta(path_meta: int) -> int:
 	return maxi(0, path_meta) % 4
+
+
+func _set_path_metadata(tile_data: Dictionary, path_variant: int, path_mask: int) -> void:
+	var path_meta: int = _compose_path_meta(path_variant, path_mask)
+	tile_data["path_meta"] = path_meta
+	tile_data["path_variant"] = _path_variant_from_meta(path_meta)
+	tile_data["path_mask"] = _path_mask_from_meta(path_meta)
+
+
+func _is_path_addon_side_clear(tile: Vector2i, path_mask_bit: int) -> bool:
+	var side_tile: Vector2i = tile + Vector2i(-1, 0) if path_mask_bit == PATH_BENCH_MASK_C2 else tile + Vector2i(0, 1)
+	if not is_inside_map(side_tile):
+		return true
+	return not is_tile_reserved(side_tile) and not is_tile_used(side_tile)
+
+
+func _has_adjacent_path_addon_conflict(tile: Vector2i) -> bool:
+	var right_tile: Vector2i = tile + Vector2i(1, 0)
+	if is_inside_map(right_tile) and get_tile_type(right_tile) == TILE_TYPE_PATH:
+		if (get_path_mask_at(right_tile) & PATH_BENCH_MASK_C2) != 0:
+			return true
+	var upper_tile: Vector2i = tile + Vector2i(0, -1)
+	if is_inside_map(upper_tile) and get_tile_type(upper_tile) == TILE_TYPE_PATH:
+		if (get_path_mask_at(upper_tile) & PATH_BENCH_MASK_C1) != 0:
+			return true
+	return false
 
 
 func _can_generate_natural_decor(tile: Vector2i) -> bool:

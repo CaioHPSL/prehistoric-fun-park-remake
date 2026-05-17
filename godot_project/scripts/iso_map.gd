@@ -7,11 +7,12 @@ signal selection_cleared
 
 const PATH_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_002.png")
 const WATER_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_005.png")
-const ENTRANCE_TEXTURE: Texture2D = preload("res://assets/original_sprites/entrance/gpack1_006.png")
 const PATH_TEXTURE_REGION_0: Rect2 = Rect2(0.0, 104.0, 38.0, 20.0)
 const PATH_TEXTURE_REGION_1: Rect2 = Rect2(38.0, 104.0, 38.0, 20.0)
 const PATH_BORDER_REGION_A: Rect2 = Rect2(76.0, 111.0, 23.0, 13.0)
 const PATH_BORDER_REGION_B: Rect2 = Rect2(98.0, 111.0, 23.0, 13.0)
+const PATH_BENCH_C2_REGION: Rect2 = Rect2(0.0, 0.0, 18.0, 17.0)
+const PATH_BENCH_C1_REGION: Rect2 = Rect2(0.0, 17.0, 17.0, 11.0)
 const WATER_ANIMATION_SECONDS: float = 0.25
 const WATER_TEXTURE_REGIONS: Array[Rect2] = [
 	Rect2(0.0, 0.0, 38.0, 20.0),
@@ -24,10 +25,10 @@ const EXTERNAL_WALL_REGION_A: Rect2 = Rect2(0.0, 28.0, 27.0, 20.0)
 const EXTERNAL_WALL_REGION_B: Rect2 = Rect2(0.0, 48.0, 27.0, 20.0)
 const EXTERNAL_CORNER_REGION_A: Rect2 = Rect2(27.0, 29.0, 21.0, 17.0)
 const EXTERNAL_CORNER_REGION_B: Rect2 = Rect2(27.0, 46.0, 20.0, 17.0)
-const EXTERNAL_ENTRY_ROAD_LENGTH: int = 6
-const ENTRANCE_ROCK_REGION: Rect2 = Rect2(0.0, 112.0, 15.0, 12.0)
-const ENTRANCE_SIGN_REGION_A: Rect2 = Rect2(90.0, 83.0, 15.0, 20.0)
-const ENTRANCE_SIGN_REGION_B: Rect2 = Rect2(105.0, 84.0, 18.0, 13.0)
+const VISIBLE_TILE_MARGIN: int = 8
+const EXTERNAL_DECOR_GRID_SIZE: int = 10
+const EXTERNAL_ROAD_SIDE_DECOR_CODE: int = 11
+const EXTERNAL_TOP_DECOR_CODE: int = 12
 const TERRAIN_TEXTURE: Texture2D = preload("res://assets/original_sprites/terrain/gpack2_000.png")
 const NATURAL_DECOR_TEXTURE: Texture2D = preload("res://assets/original_sprites/decor/gpack1_003.png")
 const TERRAIN_TEXTURE_REGIONS: Array[Rect2] = [
@@ -49,8 +50,6 @@ const NATURAL_DECOR_PIECES: Array = [
 	[[Rect2(0.0, 37.0, 26.0, 18.0), Vector2(6.0, -2.0)]],
 	[[Rect2(27.0, 34.0, 35.0, 22.0), Vector2(1.0, -5.0)]],
 ]
-const TERRAIN_BASE_COLOR: Color = Color(0.27, 0.53, 0.16, 1.0)
-
 @export var map_width: int = 30
 @export var map_height: int = 30
 @export var tile_width: int = 40
@@ -65,10 +64,12 @@ var _press_moved := false
 var _active_touch_index := -1
 var _water_frame: int = 0
 var _water_frame_timer: float = 0.0
+var _external_decor_codes: Array = []
 
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_generate_external_decor_codes()
 
 
 func _process(delta: float) -> void:
@@ -97,6 +98,10 @@ func tile_to_screen(tile: Vector2i) -> Vector2:
 func screen_to_tile(screen_position: Vector2) -> Vector2i:
 	var canvas_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen_position
 	var local_position: Vector2 = to_local(canvas_position)
+	return _local_to_tile(local_position)
+
+
+func _local_to_tile(local_position: Vector2) -> Vector2i:
 	var half_width: float = tile_width * 0.5
 	var half_height: float = tile_height * 0.5
 	var anchored_position: Vector2 = local_position - Vector2(0.0, half_height)
@@ -209,23 +214,21 @@ func _update_preview_from_screen_position(screen_position: Vector2) -> void:
 
 func _is_build_preview_active() -> bool:
 	return GameState.current_mode == "build" and (
-		GameState.selected_catalog_id == "basic_path" or GameState.selected_catalog_id == "stone_path" or GameState.selected_catalog_id == "water" or GameState.selected_catalog_id == "basic_attraction"
+		GameState.selected_catalog_id == "basic_path" or GameState.selected_catalog_id == "stone_path" or GameState.selected_catalog_id == "bench" or GameState.selected_catalog_id == "water" or GameState.selected_catalog_id == "basic_attraction"
 	)
 
 
 func _draw() -> void:
-	_draw_external_ground()
-	for x in range(map_width):
-		for y in range(map_height):
-			_draw_terrain_tile(Vector2i(x, y))
-	_draw_natural_decor_tiles()
-
-	_draw_external_road()
-	_draw_external_border()
-	_draw_entrance()
-	_draw_water_tiles()
-	_draw_path_tiles()
-	_draw_attraction_tiles()
+	var visible_bounds: Rect2i = _get_visible_tile_bounds()
+	_draw_external_ground(visible_bounds)
+	_draw_terrain_tiles(visible_bounds)
+	_draw_external_road(visible_bounds)
+	_draw_water_tiles(visible_bounds)
+	_draw_path_tiles(visible_bounds)
+	_draw_external_border(visible_bounds)
+	_draw_external_decor_tiles(visible_bounds)
+	_draw_natural_decor_tiles(visible_bounds)
+	_draw_attraction_tiles(visible_bounds)
 
 	if is_inside_map(selected_tile):
 		_draw_selected_tile()
@@ -234,16 +237,61 @@ func _draw() -> void:
 		_draw_build_preview()
 
 
+func _get_visible_tile_bounds() -> Rect2i:
+	var viewport_rect: Rect2 = get_viewport_rect()
+	var canvas_transform: Transform2D = get_viewport().get_canvas_transform()
+	var viewport_corners: Array[Vector2] = [
+		viewport_rect.position,
+		viewport_rect.position + Vector2(viewport_rect.size.x, 0.0),
+		viewport_rect.position + Vector2(0.0, viewport_rect.size.y),
+		viewport_rect.position + viewport_rect.size,
+	]
+	var min_x: int = 1000000
+	var min_y: int = 1000000
+	var max_x: int = -1000000
+	var max_y: int = -1000000
+	for corner in viewport_corners:
+		var canvas_position: Vector2 = canvas_transform.affine_inverse() * corner
+		var local_position: Vector2 = to_local(canvas_position)
+		var tile: Vector2i = _local_to_tile(local_position)
+		min_x = mini(min_x, tile.x)
+		min_y = mini(min_y, tile.y)
+		max_x = maxi(max_x, tile.x)
+		max_y = maxi(max_y, tile.y)
+	min_x -= VISIBLE_TILE_MARGIN
+	min_y -= VISIBLE_TILE_MARGIN
+	max_x += VISIBLE_TILE_MARGIN
+	max_y += VISIBLE_TILE_MARGIN
+	return Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+
+
+func _bounds_end_x(bounds: Rect2i) -> int:
+	return bounds.position.x + bounds.size.x - 1
+
+
+func _bounds_end_y(bounds: Rect2i) -> int:
+	return bounds.position.y + bounds.size.y - 1
+
+
+func _tile_in_bounds(tile: Vector2i, bounds: Rect2i) -> bool:
+	return tile.x >= bounds.position.x and tile.x <= _bounds_end_x(bounds) and tile.y >= bounds.position.y and tile.y <= _bounds_end_y(bounds)
+
+
+func _draw_terrain_tiles(visible_bounds: Rect2i) -> void:
+	var min_x: int = maxi(0, visible_bounds.position.x)
+	var max_x: int = mini(map_width - 1, _bounds_end_x(visible_bounds))
+	var min_y: int = maxi(0, visible_bounds.position.y)
+	var max_y: int = mini(map_height - 1, _bounds_end_y(visible_bounds))
+	if min_x > max_x or min_y > max_y:
+		return
+	for x in range(min_x, max_x + 1):
+		for y in range(min_y, max_y + 1):
+			_draw_terrain_tile(Vector2i(x, y))
+
+
 func _draw_terrain_tile(tile: Vector2i) -> void:
 	var top := tile_to_screen(tile)
 	var source_region: Rect2 = _get_terrain_texture_region(tile)
-	var terrain_points := PackedVector2Array([
-		top,
-		top + Vector2(tile_width * 0.5, tile_height * 0.5),
-		top + Vector2(0.0, tile_height),
-		top + Vector2(tile_width * -0.5, tile_height * 0.5),
-	])
-	draw_colored_polygon(terrain_points, TERRAIN_BASE_COLOR)
 	var target_rect: Rect2 = Rect2(
 		(top + Vector2(tile_width * -0.5, 0.0)).round(),
 		source_region.size
@@ -252,13 +300,21 @@ func _draw_terrain_tile(tile: Vector2i) -> void:
 
 
 func _get_terrain_texture_region(tile: Vector2i) -> Rect2:
+	if GameState.get_terrain_decor_code(tile) > 0:
+		return TERRAIN_TEXTURE_REGIONS[0]
 	var terrain_code: int = GameState.get_terrain_code(tile)
 	return TERRAIN_TEXTURE_REGIONS[terrain_code - 1]
 
 
-func _draw_natural_decor_tiles() -> void:
-	for x in range(map_width):
-		for y in range(map_height):
+func _draw_natural_decor_tiles(visible_bounds: Rect2i) -> void:
+	var min_x: int = maxi(0, visible_bounds.position.x)
+	var max_x: int = mini(map_width - 1, _bounds_end_x(visible_bounds))
+	var min_y: int = maxi(0, visible_bounds.position.y)
+	var max_y: int = mini(map_height - 1, _bounds_end_y(visible_bounds))
+	if min_x > max_x or min_y > max_y:
+		return
+	for x in range(min_x, max_x + 1):
+		for y in range(min_y, max_y + 1):
 			var tile: Vector2i = Vector2i(x, y)
 			var decor_code: int = GameState.get_terrain_decor_code(tile)
 			if decor_code > 0:
@@ -282,19 +338,25 @@ func _draw_natural_decor_tile(tile: Vector2i, decor_code: int) -> void:
 		)
 
 
-func _draw_external_ground() -> void:
-	for x in range(-1, map_width + 1):
-		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(x, -1), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
-		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(x, map_height), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
-	for y in range(0, map_height):
-		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(-1, y), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
-		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(map_width, y), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
+func _draw_external_ground(visible_bounds: Rect2i) -> void:
+	for x in range(visible_bounds.position.x, _bounds_end_x(visible_bounds) + 1):
+		for y in range(visible_bounds.position.y, _bounds_end_y(visible_bounds) + 1):
+			var tile: Vector2i = Vector2i(x, y)
+			if not is_inside_map(tile):
+				_draw_external_tile(TERRAIN_TEXTURE, tile, TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
 
 
-func _draw_external_road() -> void:
+func _draw_external_road(visible_bounds: Rect2i) -> void:
 	var entry_tile: Vector2i = GameState.ENTRY_TILE
-	_draw_entry_path_tile(entry_tile)
-	for road_y in range(-1, -EXTERNAL_ENTRY_ROAD_LENGTH - 1, -1):
+	if _tile_in_bounds(entry_tile, visible_bounds):
+		_draw_entry_path_tile(entry_tile)
+	if entry_tile.x < visible_bounds.position.x or entry_tile.x > _bounds_end_x(visible_bounds):
+		return
+	var min_road_y: int = visible_bounds.position.y
+	var max_road_y: int = mini(-1, _bounds_end_y(visible_bounds))
+	if min_road_y > max_road_y:
+		return
+	for road_y in range(min_road_y, max_road_y + 1):
 		_draw_external_road_tile(Vector2i(entry_tile.x, road_y))
 
 
@@ -304,19 +366,76 @@ func _draw_external_road_tile(road_tile: Vector2i) -> void:
 	_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
 
 
-func _draw_external_border() -> void:
+func _draw_external_border(visible_bounds: Rect2i) -> void:
 	var entry_tile: Vector2i = GameState.ENTRY_TILE
-	for x in range(0, map_width):
-		if x != entry_tile.x:
-			_draw_external_tile(PATH_TEXTURE, Vector2i(x, -1), EXTERNAL_WALL_REGION_B, Vector2(3.0, -3.0))
-		_draw_external_tile(PATH_TEXTURE, Vector2i(x, map_height), EXTERNAL_WALL_REGION_B, Vector2(1.0, -1.0))
-	for y in range(0, map_height):
-		_draw_external_tile(PATH_TEXTURE, Vector2i(-1, y), EXTERNAL_WALL_REGION_A, Vector2(13.0, -2.0))
-		_draw_external_tile(PATH_TEXTURE, Vector2i(map_width, y), EXTERNAL_WALL_REGION_A, Vector2(11.0, -3.0))
-	_draw_external_corner(Vector2i(-1, -1), EXTERNAL_CORNER_REGION_A, Vector2(19.0, -3.0), EXTERNAL_CORNER_REGION_B, Vector2(17.0, 4.0))
-	_draw_external_corner(Vector2i(map_width, -1), EXTERNAL_CORNER_REGION_B, Vector2(3.0, -4.0), EXTERNAL_CORNER_REGION_A, Vector2(16.0, -4.0))
-	_draw_external_corner(Vector2i(-1, map_height), EXTERNAL_CORNER_REGION_A, Vector2(5.0, 5.0), EXTERNAL_CORNER_REGION_B, Vector2(13.0, 5.0))
-	_draw_external_corner(Vector2i(map_width, map_height), EXTERNAL_CORNER_REGION_B, Vector2(-1.0, -2.0), EXTERNAL_CORNER_REGION_A, Vector2(3.0, 3.0))
+	var min_x: int = maxi(0, visible_bounds.position.x)
+	var max_x: int = mini(map_width - 1, _bounds_end_x(visible_bounds))
+	if min_x <= max_x and visible_bounds.position.y <= -1 and _bounds_end_y(visible_bounds) >= -1:
+		for x in range(min_x, max_x + 1):
+			if x != entry_tile.x:
+				_draw_external_tile(PATH_TEXTURE, Vector2i(x, -1), EXTERNAL_WALL_REGION_B, Vector2(3.0, -3.0))
+	if min_x <= max_x and visible_bounds.position.y <= map_height and _bounds_end_y(visible_bounds) >= map_height:
+		for x in range(min_x, max_x + 1):
+			_draw_external_tile(PATH_TEXTURE, Vector2i(x, map_height), EXTERNAL_WALL_REGION_B, Vector2(1.0, -1.0))
+	var min_y: int = maxi(0, visible_bounds.position.y)
+	var max_y: int = mini(map_height - 1, _bounds_end_y(visible_bounds))
+	if min_y <= max_y and visible_bounds.position.x <= -1 and _bounds_end_x(visible_bounds) >= -1:
+		for y in range(min_y, max_y + 1):
+			_draw_external_tile(PATH_TEXTURE, Vector2i(-1, y), EXTERNAL_WALL_REGION_A, Vector2(13.0, -2.0))
+	if min_y <= max_y and visible_bounds.position.x <= map_width and _bounds_end_x(visible_bounds) >= map_width:
+		for y in range(min_y, max_y + 1):
+			_draw_external_tile(PATH_TEXTURE, Vector2i(map_width, y), EXTERNAL_WALL_REGION_A, Vector2(11.0, -3.0))
+	if _tile_in_bounds(Vector2i(-1, -1), visible_bounds):
+		_draw_external_corner(Vector2i(-1, -1), EXTERNAL_CORNER_REGION_A, Vector2(19.0, -3.0), EXTERNAL_CORNER_REGION_B, Vector2(17.0, 4.0))
+	if _tile_in_bounds(Vector2i(map_width, -1), visible_bounds):
+		_draw_external_corner(Vector2i(map_width, -1), EXTERNAL_CORNER_REGION_B, Vector2(3.0, -4.0), EXTERNAL_CORNER_REGION_A, Vector2(16.0, -4.0))
+	if _tile_in_bounds(Vector2i(-1, map_height), visible_bounds):
+		_draw_external_corner(Vector2i(-1, map_height), EXTERNAL_CORNER_REGION_A, Vector2(5.0, 5.0), EXTERNAL_CORNER_REGION_B, Vector2(13.0, 5.0))
+	if _tile_in_bounds(Vector2i(map_width, map_height), visible_bounds):
+		_draw_external_corner(Vector2i(map_width, map_height), EXTERNAL_CORNER_REGION_B, Vector2(-1.0, -2.0), EXTERNAL_CORNER_REGION_A, Vector2(3.0, 3.0))
+
+
+func _draw_external_decor_tiles(visible_bounds: Rect2i) -> void:
+	_ensure_external_decor_codes()
+	for x in range(visible_bounds.position.x, _bounds_end_x(visible_bounds) + 1):
+		for y in range(visible_bounds.position.y, _bounds_end_y(visible_bounds) + 1):
+			var tile: Vector2i = Vector2i(x, y)
+			var decor_code: int = _get_external_decor_code(tile)
+			if decor_code > 0:
+				_draw_natural_decor_tile(tile, decor_code)
+
+
+func _generate_external_decor_codes() -> void:
+	_external_decor_codes = []
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for x in range(EXTERNAL_DECOR_GRID_SIZE):
+		var column: Array = []
+		for y in range(EXTERNAL_DECOR_GRID_SIZE):
+			column.append(rng.randi_range(1, 12))
+		_external_decor_codes.append(column)
+
+
+func _ensure_external_decor_codes() -> void:
+	if _external_decor_codes.size() == EXTERNAL_DECOR_GRID_SIZE:
+		return
+	_generate_external_decor_codes()
+
+
+func _get_external_decor_code(tile: Vector2i) -> int:
+	if is_inside_map(tile):
+		return 0
+	if tile.x == -1 or tile.y == -1 or tile.x == map_width or tile.y == map_height:
+		return 0
+	var entry_tile: Vector2i = GameState.ENTRY_TILE
+	if tile.x == entry_tile.x and tile.y <= 0:
+		return 0
+	if (tile.x == entry_tile.x - 1 or tile.x == entry_tile.x + 1) and tile.y < 0:
+		return EXTERNAL_ROAD_SIDE_DECOR_CODE
+	if tile.y == -2 and tile.x >= 0 and tile.x < map_width:
+		return EXTERNAL_TOP_DECOR_CODE
+	var column: Array = _external_decor_codes[posmod(tile.x, EXTERNAL_DECOR_GRID_SIZE)] as Array
+	return int(column[posmod(tile.y, EXTERNAL_DECOR_GRID_SIZE)])
 
 
 func _draw_external_corner(tile: Vector2i, first_region: Rect2, first_offset: Vector2, second_region: Rect2, second_offset: Vector2) -> void:
@@ -339,29 +458,31 @@ func _draw_entry_path_tile(tile: Vector2i) -> void:
 	var top: Vector2 = tile_to_screen(tile)
 	var target_rect: Rect2 = Rect2(
 		top + Vector2(tile_width * -0.5, 0.0),
-		Vector2(tile_width, tile_height)
+		PATH_TEXTURE_REGION_0.size
 	)
 	draw_texture_rect_region(PATH_TEXTURE, target_rect, PATH_TEXTURE_REGION_0)
 	_draw_path_border_overlays(tile, target_rect.position)
 
 
-func _draw_path_tiles() -> void:
+func _draw_path_tiles(visible_bounds: Rect2i) -> void:
 	for tile_data in GameState.tiles:
 		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_PATH:
 			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
-			if is_inside_map(tile):
+			if is_inside_map(tile) and _tile_in_bounds(tile, visible_bounds):
 				var path_meta: int = _get_path_meta(tile_data)
-				_draw_path_tile(tile, floori(float(maxi(0, path_meta)) / 4.0))
+				_draw_path_tile(tile, floori(float(maxi(0, path_meta)) / 4.0), _get_path_mask(tile_data))
 
 
-func _draw_path_tile(tile: Vector2i, path_variant: int) -> void:
+func _draw_path_tile(tile: Vector2i, path_variant: int, path_mask: int) -> void:
 	var top := tile_to_screen(tile)
+	var source_region: Rect2 = _get_path_texture_region(path_variant)
 	var target_rect: Rect2 = Rect2(
 		top + Vector2(tile_width * -0.5, 0.0),
-		Vector2(tile_width, tile_height)
+		source_region.size
 	)
-	draw_texture_rect_region(PATH_TEXTURE, target_rect, _get_path_texture_region(path_variant))
+	draw_texture_rect_region(PATH_TEXTURE, target_rect, source_region)
 	_draw_path_border_overlays(tile, target_rect.position)
+	_draw_path_addon_overlays(target_rect.position, path_mask)
 
 
 func _get_path_texture_region(path_variant: int) -> Rect2:
@@ -378,6 +499,12 @@ func _get_path_meta(tile_data: Dictionary) -> int:
 	return maxi(0, path_variant) * 4 + clampi(path_mask, 0, 3)
 
 
+func _get_path_mask(tile_data: Dictionary) -> int:
+	if tile_data.has("path_mask"):
+		return clampi(int(tile_data.get("path_mask", 0)), 0, 3)
+	return maxi(0, int(tile_data.get("path_meta", 0))) % 4
+
+
 func _draw_path_border_overlays(tile: Vector2i, base_position: Vector2) -> void:
 	if not _is_path_visually_connected(tile, Vector2i(tile.x, tile.y + 1)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(18.0, -1.0))
@@ -387,6 +514,13 @@ func _draw_path_border_overlays(tile: Vector2i, base_position: Vector2) -> void:
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(-1.0, 7.0))
 	if not _is_path_visually_connected(tile, Vector2i(tile.x + 1, tile.y)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
+
+
+func _draw_path_addon_overlays(base_position: Vector2, path_mask: int) -> void:
+	if (path_mask & GameState.PATH_BENCH_MASK_C2) != 0:
+		_draw_path_overlay(base_position, PATH_BENCH_C2_REGION, Vector2(1.0, -8.0))
+	if (path_mask & GameState.PATH_BENCH_MASK_C1) != 0:
+		_draw_path_overlay(base_position, PATH_BENCH_C1_REGION, Vector2(19.0, -2.0))
 
 
 func _is_path_visually_connected(source_tile: Vector2i, neighbor_tile: Vector2i) -> bool:
@@ -401,7 +535,7 @@ func _is_path_visually_connected(source_tile: Vector2i, neighbor_tile: Vector2i)
 
 func _is_external_entry_road_tile(tile: Vector2i) -> bool:
 	var entry_tile: Vector2i = GameState.ENTRY_TILE
-	return tile.x == entry_tile.x and tile.y < entry_tile.y and tile.y >= -EXTERNAL_ENTRY_ROAD_LENGTH
+	return tile.x == entry_tile.x and tile.y < entry_tile.y
 
 
 func _draw_path_overlay(base_position: Vector2, source_region: Rect2, offset: Vector2) -> void:
@@ -412,11 +546,11 @@ func _draw_path_overlay(base_position: Vector2, source_region: Rect2, offset: Ve
 	)
 
 
-func _draw_water_tiles() -> void:
+func _draw_water_tiles(visible_bounds: Rect2i) -> void:
 	for tile_data in GameState.tiles:
 		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_WATER:
 			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
-			if is_inside_map(tile):
+			if is_inside_map(tile) and _tile_in_bounds(tile, visible_bounds):
 				_draw_water_tile(tile)
 
 
@@ -451,11 +585,11 @@ func _draw_water_overlay(base_position: Vector2, source_region: Rect2, offset: V
 	)
 
 
-func _draw_attraction_tiles() -> void:
+func _draw_attraction_tiles(visible_bounds: Rect2i) -> void:
 	for tile_data in GameState.tiles:
 		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_ATTRACTION:
 			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
-			if is_inside_map(tile):
+			if is_inside_map(tile) and _tile_in_bounds(tile, visible_bounds):
 				_draw_attraction_tile(tile)
 
 
@@ -471,22 +605,6 @@ func _draw_attraction_tile(tile: Vector2i) -> void:
 	outline.append(points[0])
 	draw_colored_polygon(points, Color(0.72, 0.32, 0.2, 1.0))
 	draw_polyline(outline, Color(0.36, 0.12, 0.08, 1.0), 1.5)
-
-
-func _draw_entrance() -> void:
-	var tile: Vector2i = GameState.ENTRY_TILE
-	if not is_inside_map(tile):
-		return
-	var left_tile: Vector2i = Vector2i(tile.x - 1, -1)
-	var right_tile: Vector2i = Vector2i(tile.x + 1, -1)
-	_draw_external_tile(ENTRANCE_TEXTURE, left_tile, ENTRANCE_ROCK_REGION, Vector2(14.0, -2.0))
-	_draw_external_tile(ENTRANCE_TEXTURE, left_tile, ENTRANCE_ROCK_REGION, Vector2(15.0, -8.0))
-	_draw_external_tile(ENTRANCE_TEXTURE, left_tile, ENTRANCE_ROCK_REGION, Vector2(17.0, -14.0))
-	_draw_external_tile(ENTRANCE_TEXTURE, right_tile, ENTRANCE_ROCK_REGION, Vector2(4.0, -7.0))
-	_draw_external_tile(ENTRANCE_TEXTURE, right_tile, ENTRANCE_ROCK_REGION, Vector2(3.0, -15.0))
-	_draw_external_tile(ENTRANCE_TEXTURE, right_tile, ENTRANCE_ROCK_REGION, Vector2(2.0, -23.0))
-	_draw_external_tile(PATH_TEXTURE, right_tile, ENTRANCE_SIGN_REGION_A, Vector2(-19.0, -44.0))
-	_draw_external_tile(PATH_TEXTURE, right_tile, ENTRANCE_SIGN_REGION_B, Vector2(-4.0, -33.0))
 
 
 func _draw_selected_tile() -> void:
@@ -513,6 +631,9 @@ func _draw_build_preview() -> void:
 	if GameState.selected_catalog_id == "water" and can_build:
 		fill_color = Color(0.2, 0.55, 1.0, 0.38)
 		outline_color = Color(0.1, 0.38, 0.95, 1.0)
+	if GameState.selected_catalog_id == "bench" and can_build:
+		fill_color = Color(0.62, 0.42, 0.22, 0.38)
+		outline_color = Color(0.48, 0.28, 0.12, 1.0)
 	if GameState.selected_catalog_id == "basic_attraction" and can_build:
 		fill_color = Color(1.0, 0.86, 0.18, 0.38)
 		outline_color = Color(0.95, 0.7, 0.08, 1.0)
@@ -537,6 +658,12 @@ func _can_build_preview(size: Vector2i) -> bool:
 	var cost: int = int(building_data.get("cost", 0))
 	if not Economy.can_afford(cost):
 		return false
+	if GameState.selected_catalog_id == "bench":
+		return GameState.can_add_path_addon(preview_tile, GameState.selected_path_addon_mask)
+	if GameState.selected_catalog_id == "stone_path" and GameState.get_tile_type(preview_tile) == GameState.TILE_TYPE_PATH:
+		return GameState.can_upgrade_path_tile(preview_tile, GameState.PATH_STONE_VARIANT)
+	if GameState.selected_catalog_id == "water":
+		return GameState.get_tile_type(preview_tile) == GameState.TILE_TYPE_PATH
 	if preview_tile.x < 0 or preview_tile.y < 0:
 		return false
 	if preview_tile.x + size.x > map_width or preview_tile.y + size.y > map_height:
