@@ -29,16 +29,19 @@ const BASIC_ATTRACTION_SIZE: Vector2i = Vector2i(3, 3)
 @onready var hud: Control = $UI/HUD
 @onready var build_menu: Control = $UI/BuildMenu
 @onready var building_info_panel: Control = $UI/BuildingInfoPanel
-@onready var basic_path_button: Button = $UI/BuildMenu/Items/BasicPathButton
-@onready var stone_path_button: Button = $UI/BuildMenu/Items/StonePathButton
-@onready var bench_button: Button = $UI/BuildMenu/Items/BenchButton
-@onready var water_button: Button = $UI/BuildMenu/Items/WaterButton
-@onready var basic_attraction_button: Button = $UI/BuildMenu/Items/BasicAttractionButton
-@onready var cancel_build_button: Button = $UI/BuildMenu/Items/CancelButton
+@onready var build_items_container: VBoxContainer = $UI/BuildMenu/Scroll/Items
+@onready var basic_path_button: Button = $UI/BuildMenu/Scroll/Items/BasicPathButton
+@onready var stone_path_button: Button = $UI/BuildMenu/Scroll/Items/StonePathButton
+@onready var bench_button: Button = $UI/BuildMenu/Scroll/Items/BenchButton
+@onready var water_button: Button = $UI/BuildMenu/Scroll/Items/WaterButton
+@onready var basic_attraction_button: Button = $UI/BuildMenu/Scroll/Items/BasicAttractionButton
+@onready var cancel_build_button: Button = $UI/BuildMenu/Scroll/Items/CancelButton
 @onready var building_title_label: Label = $UI/BuildingInfoPanel/Content/Title
 @onready var building_details_label: Label = $UI/BuildingInfoPanel/Content/Details
 @onready var building_sell_button: Button = $UI/BuildingInfoPanel/Content/SellButton
 @onready var building_close_button: Button = $UI/BuildingInfoPanel/Content/CloseButton
+
+var attraction_buttons: Dictionary = {}
 
 
 func _ready() -> void:
@@ -52,6 +55,8 @@ func _ready() -> void:
 		iso_map.selection_cleared.connect(_on_selection_cleared)
 	if visitor_system.has_method("configure"):
 		visitor_system.configure(iso_map)
+	if iso_map.has_method("set_visitor_system"):
+		iso_map.set_visitor_system(visitor_system)
 	if visitor_system.has_signal("visitor_paid"):
 		visitor_system.visitor_paid.connect(_on_visitor_paid)
 	if visitor_system.has_signal("visitor_stats_changed"):
@@ -66,7 +71,7 @@ func _ready() -> void:
 	stone_path_button.pressed.connect(_on_stone_path_pressed)
 	bench_button.pressed.connect(_on_bench_pressed)
 	water_button.pressed.connect(_on_water_pressed)
-	basic_attraction_button.pressed.connect(_on_basic_attraction_pressed)
+	_populate_attraction_buttons()
 	cancel_build_button.pressed.connect(_on_build_cancel_pressed)
 	building_close_button.pressed.connect(_on_building_info_close_pressed)
 	building_sell_button.pressed.connect(_on_building_sell_pressed)
@@ -87,6 +92,7 @@ func close_build_menu() -> void:
 func select_building(building_id: String) -> void:
 	GameState.current_mode = "build"
 	GameState.selected_catalog_id = building_id
+	var catalog_data: Dictionary = Catalog.get_building(building_id)
 	if building_id == BASIC_PATH_ID:
 		_show_build_mode("Build: %s" % BASIC_PATH_NAME)
 	elif building_id == STONE_PATH_ID:
@@ -95,8 +101,8 @@ func select_building(building_id: String) -> void:
 		_show_build_mode("Build: %s %s" % [BENCH_NAME, _get_bench_orientation_label()])
 	elif building_id == WATER_ID:
 		_show_build_mode("Build: %s" % WATER_NAME)
-	elif building_id == "basic_attraction":
-		_show_build_mode("Build: %s" % BASIC_ATTRACTION_NAME)
+	elif _is_attraction_catalog_id(building_id):
+		_show_build_mode("Build: %s" % String(catalog_data.get("name", building_id)))
 	if iso_map.has_method("refresh_tiles"):
 		iso_map.refresh_tiles()
 
@@ -135,8 +141,8 @@ func _on_tile_touched(tile: Vector2i) -> void:
 		_try_build_bench(tile)
 	elif GameState.current_mode == "build" and GameState.selected_catalog_id == WATER_ID:
 		_try_build_water(tile)
-	elif GameState.current_mode == "build" and GameState.selected_catalog_id == "basic_attraction":
-		_try_build_basic_attraction(tile)
+	elif GameState.current_mode == "build" and _is_attraction_catalog_id(GameState.selected_catalog_id):
+		_try_build_attraction(tile, GameState.selected_catalog_id)
 	_show_selected_object(tile)
 	_show_building_info(tile)
 
@@ -179,12 +185,22 @@ func _show_building_info(tile: Vector2i) -> void:
 		building_sell_button.visible = true
 		building_info_panel.visible = true
 	elif tile_type == GameState.TILE_TYPE_ATTRACTION:
-		building_title_label.text = BASIC_ATTRACTION_NAME
-		var attraction_origin: Vector2i = GameState.get_basic_attraction_origin_at(tile)
+		var building_data: Dictionary = GameState.get_attraction_building_at(tile)
+		var attraction_id: String = String(building_data.get("id", "basic_attraction"))
+		var catalog_data: Dictionary = Catalog.get_building(attraction_id)
+		building_title_label.text = String(catalog_data.get("name", building_data.get("name", BASIC_ATTRACTION_NAME)))
+		var attraction_origin: Vector2i = GameState.get_attraction_origin_at(tile)
 		var visitors_served: int = 0
 		if visitor_system.has_method("get_visitors_served_for_attraction"):
 			visitors_served = visitor_system.get_visitors_served_for_attraction(attraction_origin)
-		building_details_label.text = "Type: Attraction\nCost: %d\nTicket price: %d\nSatisfaction: %d\nVisitors served: %d" % [BASIC_ATTRACTION_COST, BASIC_ATTRACTION_TICKET_PRICE, BASIC_ATTRACTION_SATISFACTION, visitors_served]
+		building_details_label.text = "Type: Attraction\nCost: %d\nTicket price: %d\nCapacity: %d\nDuration: %d ticks\nSatisfaction: %d\nVisitors served: %d" % [
+			int(catalog_data.get("cost", 0)),
+			int(catalog_data.get("ticket_price", 0)),
+			int(catalog_data.get("visitor_capacity", 0)),
+			int(catalog_data.get("use_duration_ticks", 0)),
+			int(catalog_data.get("satisfaction_gain", 0)),
+			visitors_served,
+		]
 		building_sell_button.visible = true
 		building_info_panel.visible = true
 	else:
@@ -225,6 +241,37 @@ func _on_basic_attraction_pressed() -> void:
 	close_build_menu()
 
 
+func _on_attraction_button_pressed(catalog_id: String) -> void:
+	select_building(catalog_id)
+	close_build_menu()
+
+
+func _populate_attraction_buttons() -> void:
+	var attraction_ids: Array[String] = Catalog.get_building_ids_by_type("attraction")
+	attraction_ids.sort_custom(Callable(self, "_sort_attraction_ids_by_jar_type"))
+	for catalog_id in attraction_ids:
+		var catalog_data: Dictionary = Catalog.get_building(catalog_id)
+		var button: Button = basic_attraction_button if catalog_id == "basic_attraction" else Button.new()
+		button.name = _button_name_from_catalog_id(catalog_id)
+		button.text = "%s ($%d)" % [String(catalog_data.get("name", catalog_id)), int(catalog_data.get("cost", 0))]
+		if button.get_parent() == null:
+			build_items_container.add_child(button)
+			build_items_container.move_child(button, maxi(0, build_items_container.get_child_count() - 2))
+		button.pressed.connect(_on_attraction_button_pressed.bind(catalog_id))
+		attraction_buttons[catalog_id] = button
+
+
+func _button_name_from_catalog_id(catalog_id: String) -> String:
+	var button_name: String = ""
+	for part in catalog_id.split("_"):
+		button_name += String(part).capitalize().replace(" ", "")
+	return "%sButton" % button_name
+
+
+func _sort_attraction_ids_by_jar_type(a: String, b: String) -> bool:
+	return int(Catalog.get_building(a).get("jar_type", 999)) < int(Catalog.get_building(b).get("jar_type", 999))
+
+
 func _on_build_cancel_pressed() -> void:
 	clear_build_mode()
 	close_build_menu()
@@ -253,8 +300,10 @@ func _on_building_sell_pressed() -> void:
 	elif tile_type == GameState.TILE_TYPE_WATER:
 		sold = GameState.remove_water_tile(tile)
 	elif tile_type == GameState.TILE_TYPE_ATTRACTION:
-		sold = GameState.remove_basic_attraction_at(tile)
-		refund = BASIC_ATTRACTION_REFUND
+		var building_data: Dictionary = GameState.get_attraction_building_at(tile)
+		var catalog_data: Dictionary = Catalog.get_building(String(building_data.get("id", "basic_attraction")))
+		sold = GameState.remove_attraction_at(tile)
+		refund = int(round(float(catalog_data.get("cost", 0)) * float(catalog_data.get("sell_refund_ratio", 0.5))))
 	if not sold:
 		return
 	Economy.money += refund
@@ -412,6 +461,8 @@ func _try_build_path(tile: Vector2i, cost: int, path_variant: int, path_mask: in
 
 
 func _try_build_basic_attraction(tile: Vector2i) -> void:
+	_try_build_attraction(tile, "basic_attraction")
+	return
 	var size: Vector2i = BASIC_ATTRACTION_SIZE
 	if not _is_area_inside_map(tile, size):
 		_show_error_message("Outside map")
@@ -436,6 +487,41 @@ func _try_build_basic_attraction(tile: Vector2i) -> void:
 		if hud.has_method("update_money"):
 			hud.update_money()
 		if not GameState.has_connected_basic_attraction(tile):
+			_show_error_message("Attraction needs Path")
+		_spawn_simple_visitor()
+
+
+func _try_build_attraction(tile: Vector2i, catalog_id: String) -> void:
+	var catalog_data: Dictionary = Catalog.get_building(catalog_id)
+	if catalog_data.is_empty() or String(catalog_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION:
+		_show_error_message("Unknown attraction")
+		return
+	var size: Vector2i = _get_catalog_size(catalog_data)
+	var attraction_name: String = String(catalog_data.get("name", catalog_id))
+	var attraction_cost: int = int(catalog_data.get("cost", 0))
+	if not _is_area_inside_map(tile, size):
+		_show_error_message("Outside map")
+		print("Cannot place ", attraction_name, " at: ", tile)
+		return
+	if _area_includes_entrance(tile, size):
+		_show_error_message("Entrance blocked")
+		print("Cannot place ", attraction_name, " at: ", tile)
+		return
+	if not GameState.can_place_building(catalog_id, tile):
+		_show_error_message("Tile occupied")
+		print("Cannot place ", attraction_name, " at: ", tile)
+		return
+	if not Economy.can_afford(attraction_cost):
+		_show_error_message("Not enough money")
+		print("Not enough money for ", attraction_name)
+		return
+	if GameState.add_attraction(catalog_id, tile):
+		Economy.spend(attraction_cost)
+		if iso_map.has_method("refresh_tiles"):
+			iso_map.refresh_tiles()
+		if hud.has_method("update_money"):
+			hud.update_money()
+		if not GameState.has_connected_attraction(tile):
 			_show_error_message("Attraction needs Path")
 		_spawn_simple_visitor()
 
@@ -505,6 +591,16 @@ func _get_bench_orientation_label() -> String:
 	return "(c&1)" if GameState.selected_path_addon_mask == GameState.PATH_BENCH_MASK_C1 else "(c&2)"
 
 
+func _is_attraction_catalog_id(catalog_id: String) -> bool:
+	var catalog_data: Dictionary = Catalog.get_building(catalog_id)
+	return String(catalog_data.get("type", "")) == GameState.TILE_TYPE_ATTRACTION or String(catalog_data.get("category", "")) == GameState.TILE_TYPE_ATTRACTION
+
+
+func _get_catalog_size(catalog_data: Dictionary) -> Vector2i:
+	var size_data: Array = catalog_data.get("size", [1, 1]) as Array
+	return Vector2i(int(size_data[0]), int(size_data[1]))
+
+
 func _spawn_simple_visitor() -> void:
 	if visitor_system.has_method("spawn_single_visitor"):
 		visitor_system.spawn_single_visitor()
@@ -530,3 +626,5 @@ func _on_visitor_paid(amount: int) -> void:
 func _on_visitor_stats_changed(active_count: int, served_count: int) -> void:
 	if hud.has_method("update_visitors"):
 		hud.update_visitors(active_count, served_count)
+	if hud.has_method("update_visitor_debug_stats") and visitor_system.has_method("get_visitor_debug_stats"):
+		hud.update_visitor_debug_stats(visitor_system.get_visitor_debug_stats())

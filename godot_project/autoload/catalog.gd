@@ -22,6 +22,16 @@ func get_building(catalog_id: String) -> Dictionary:
 	return buildings.get(catalog_id, {})
 
 
+func get_building_ids_by_type(building_type: String) -> Array[String]:
+	var ids: Array[String] = []
+	for catalog_id in buildings.keys():
+		var building_data: Dictionary = buildings[catalog_id]
+		if String(building_data.get("type", "")) == building_type or String(building_data.get("category", "")) == building_type:
+			ids.append(String(catalog_id))
+	ids.sort()
+	return ids
+
+
 func _load_json(path: String) -> Dictionary:
 	if not FileAccess.file_exists(path):
 		return {}
