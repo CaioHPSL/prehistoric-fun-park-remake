@@ -62,7 +62,7 @@ func show_selected_object(object_type: String) -> void:
 	if object_type == "path":
 		selected_object_label.text = "Selected: Path"
 	elif object_type == "attraction":
-		selected_object_label.text = "Selected: Attraction"
+		selected_object_label.text = "Selected: Balanço"
 	else:
 		selected_object_label.text = "Selected: none"
 
