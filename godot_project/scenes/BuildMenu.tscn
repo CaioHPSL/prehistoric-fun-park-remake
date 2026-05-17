@@ -7,7 +7,7 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 16.0
-offset_top = -245.0
+offset_top = -280.0
 offset_right = 300.0
 offset_bottom = -16.0
 grow_vertical = 0
@@ -21,11 +21,15 @@ text = "Build"
 
 [node name="BasicPathButton" type="Button" parent="Items"]
 layout_mode = 2
-text = "Basic Path"
+text = "Caminho de cascalho"
 
 [node name="StonePathButton" type="Button" parent="Items"]
 layout_mode = 2
 text = "Caminho de pedra"
+
+[node name="BenchButton" type="Button" parent="Items"]
+layout_mode = 2
+text = "Banco"
 
 [node name="WaterButton" type="Button" parent="Items"]
 layout_mode = 2

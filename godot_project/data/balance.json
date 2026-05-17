@@ -4,6 +4,7 @@
   "initial_money": 2000,
   "basic_path_cost": 3,
   "stone_path_cost": 6,
+  "bench_cost": 3,
   "water_cost": 10,
   "basic_attraction_cost": 30,
   "basic_attraction_ticket_price": 1,

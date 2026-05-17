@@ -2,12 +2,17 @@ extends Node2D
 
 # Coordinates the park scene. Detailed build and visitor behavior will be added later.
 
+const BASIC_PATH_ID: String = "basic_path"
+const BASIC_PATH_NAME: String = "Caminho de cascalho"
 const BASIC_PATH_COST: int = 3
 const BASIC_PATH_REFUND: int = 1
 const STONE_PATH_ID: String = "stone_path"
 const STONE_PATH_NAME: String = "Caminho de pedra"
 const STONE_PATH_COST: int = 6
 const STONE_PATH_REFUND: int = 3
+const BENCH_ID: String = "bench"
+const BENCH_NAME: String = "Banco"
+const BENCH_COST: int = 3
 const WATER_ID: String = "water"
 const WATER_NAME: String = "Água"
 const WATER_COST: int = 10
@@ -26,6 +31,7 @@ const BASIC_ATTRACTION_SIZE: Vector2i = Vector2i(3, 3)
 @onready var building_info_panel: Control = $UI/BuildingInfoPanel
 @onready var basic_path_button: Button = $UI/BuildMenu/Items/BasicPathButton
 @onready var stone_path_button: Button = $UI/BuildMenu/Items/StonePathButton
+@onready var bench_button: Button = $UI/BuildMenu/Items/BenchButton
 @onready var water_button: Button = $UI/BuildMenu/Items/WaterButton
 @onready var basic_attraction_button: Button = $UI/BuildMenu/Items/BasicAttractionButton
 @onready var cancel_build_button: Button = $UI/BuildMenu/Items/CancelButton
@@ -58,6 +64,7 @@ func _ready() -> void:
 		hud.load_requested.connect(_on_load_requested)
 	basic_path_button.pressed.connect(_on_basic_path_pressed)
 	stone_path_button.pressed.connect(_on_stone_path_pressed)
+	bench_button.pressed.connect(_on_bench_pressed)
 	water_button.pressed.connect(_on_water_pressed)
 	basic_attraction_button.pressed.connect(_on_basic_attraction_pressed)
 	cancel_build_button.pressed.connect(_on_build_cancel_pressed)
@@ -80,10 +87,12 @@ func close_build_menu() -> void:
 func select_building(building_id: String) -> void:
 	GameState.current_mode = "build"
 	GameState.selected_catalog_id = building_id
-	if building_id == "basic_path":
-		_show_build_mode("Build: Path")
+	if building_id == BASIC_PATH_ID:
+		_show_build_mode("Build: %s" % BASIC_PATH_NAME)
 	elif building_id == STONE_PATH_ID:
 		_show_build_mode("Build: %s" % STONE_PATH_NAME)
+	elif building_id == BENCH_ID:
+		_show_build_mode("Build: %s %s" % [BENCH_NAME, _get_bench_orientation_label()])
 	elif building_id == WATER_ID:
 		_show_build_mode("Build: %s" % WATER_NAME)
 	elif building_id == "basic_attraction":
@@ -95,6 +104,7 @@ func select_building(building_id: String) -> void:
 func clear_build_mode() -> void:
 	GameState.current_mode = "select"
 	GameState.selected_catalog_id = ""
+	GameState.selected_path_addon_mask = GameState.PATH_BENCH_DEFAULT_MASK
 	_show_build_mode("Build: none")
 	if iso_map.has_method("refresh_tiles"):
 		iso_map.refresh_tiles()
@@ -117,10 +127,12 @@ func _on_tile_touched(tile: Vector2i) -> void:
 	print("Selected tile: ", tile)
 	if hud.has_method("show_selected_tile"):
 		hud.show_selected_tile(tile)
-	if GameState.current_mode == "build" and GameState.selected_catalog_id == "basic_path":
+	if GameState.current_mode == "build" and GameState.selected_catalog_id == BASIC_PATH_ID:
 		_try_build_basic_path(tile)
 	elif GameState.current_mode == "build" and GameState.selected_catalog_id == STONE_PATH_ID:
 		_try_build_stone_path(tile)
+	elif GameState.current_mode == "build" and GameState.selected_catalog_id == BENCH_ID:
+		_try_build_bench(tile)
 	elif GameState.current_mode == "build" and GameState.selected_catalog_id == WATER_ID:
 		_try_build_water(tile)
 	elif GameState.current_mode == "build" and GameState.selected_catalog_id == "basic_attraction":
@@ -185,12 +197,21 @@ func _hide_building_info() -> void:
 
 
 func _on_basic_path_pressed() -> void:
-	select_building("basic_path")
+	select_building(BASIC_PATH_ID)
 	close_build_menu()
 
 
 func _on_stone_path_pressed() -> void:
 	select_building(STONE_PATH_ID)
+	close_build_menu()
+
+
+func _on_bench_pressed() -> void:
+	if GameState.current_mode == "build" and GameState.selected_catalog_id == BENCH_ID:
+		_toggle_bench_orientation()
+	else:
+		GameState.selected_path_addon_mask = GameState.PATH_BENCH_DEFAULT_MASK
+		select_building(BENCH_ID)
 	close_build_menu()
 
 
@@ -207,6 +228,12 @@ func _on_basic_attraction_pressed() -> void:
 func _on_build_cancel_pressed() -> void:
 	clear_build_mode()
 	close_build_menu()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_R and GameState.current_mode == "build" and GameState.selected_catalog_id == BENCH_ID:
+			_toggle_bench_orientation()
 
 
 func _on_building_info_close_pressed() -> void:
@@ -269,6 +296,7 @@ func _on_load_requested() -> void:
 	GameState.from_save_data(data)
 	GameState.current_mode = "select"
 	GameState.selected_catalog_id = ""
+	GameState.selected_path_addon_mask = GameState.PATH_BENCH_DEFAULT_MASK
 	GameState.selected_tile = Vector2i(-1, -1)
 	if iso_map.has_method("configure"):
 		iso_map.configure(GameState.map_width, GameState.map_height)
@@ -297,11 +325,36 @@ func _on_load_requested() -> void:
 
 
 func _try_build_basic_path(tile: Vector2i) -> void:
-	_try_build_path(tile, BASIC_PATH_COST, GameState.PATH_GRAVEL_VARIANT, GameState.PATH_GRAVEL_MASK, "Basic Path")
+	_try_build_path(tile, BASIC_PATH_COST, GameState.PATH_GRAVEL_VARIANT, GameState.PATH_GRAVEL_MASK, BASIC_PATH_NAME)
 
 
 func _try_build_stone_path(tile: Vector2i) -> void:
 	_try_build_path(tile, STONE_PATH_COST, GameState.PATH_STONE_VARIANT, GameState.PATH_STONE_MASK, STONE_PATH_NAME)
+
+
+func _try_build_bench(tile: Vector2i) -> void:
+	if not _is_area_inside_map(tile, Vector2i(1, 1)):
+		_show_error_message("Outside map")
+		return
+	if GameState.is_entrance_tile(tile):
+		_show_error_message("Entrance blocked")
+		return
+	if GameState.get_tile_type(tile) != GameState.TILE_TYPE_PATH:
+		_show_error_message("Needs Path")
+		return
+	if not GameState.can_add_path_addon(tile, GameState.selected_path_addon_mask):
+		_show_error_message("Bench already exists")
+		return
+	if not Economy.can_afford(BENCH_COST):
+		_show_error_message("Not enough money")
+		print("Not enough money for ", BENCH_NAME)
+		return
+	if GameState.add_path_addon(tile, GameState.selected_path_addon_mask):
+		Economy.spend(BENCH_COST)
+		if iso_map.has_method("refresh_tiles"):
+			iso_map.refresh_tiles()
+		if hud.has_method("update_money"):
+			hud.update_money()
 
 
 func _try_build_water(tile: Vector2i) -> void:
@@ -311,9 +364,8 @@ func _try_build_water(tile: Vector2i) -> void:
 	if GameState.is_entrance_tile(tile):
 		_show_error_message("Entrance blocked")
 		return
-	if GameState.is_tile_used(tile):
-		_show_error_message("Tile occupied")
-		print("Tile already used: ", tile)
+	if GameState.get_tile_type(tile) != GameState.TILE_TYPE_PATH:
+		_show_error_message("Needs Path")
 		return
 	if not Economy.can_afford(WATER_COST):
 		_show_error_message("Not enough money")
@@ -334,14 +386,22 @@ func _try_build_path(tile: Vector2i, cost: int, path_variant: int, path_mask: in
 	if GameState.is_entrance_tile(tile):
 		_show_error_message("Entrance blocked")
 		return
-	if GameState.is_tile_used(tile):
-		_show_error_message("Tile occupied")
-		print("Tile already used: ", tile)
-		return
 	if not Economy.can_afford(cost):
 		_show_error_message("Not enough money")
 		print("Not enough money for ", path_name)
 		return
+	if GameState.is_tile_used(tile):
+		if GameState.upgrade_path_tile(tile, path_variant):
+			Economy.spend(cost)
+			if iso_map.has_method("refresh_tiles"):
+				iso_map.refresh_tiles()
+			if hud.has_method("update_money"):
+				hud.update_money()
+			return
+		else:
+			_show_error_message("Tile occupied")
+			print("Tile already used: ", tile)
+			return
 	if GameState.add_path_tile(tile, path_variant, path_mask):
 		Economy.spend(cost)
 		if iso_map.has_method("refresh_tiles"):
@@ -398,11 +458,15 @@ func _is_area_occupied(origin: Vector2i, size: Vector2i) -> bool:
 
 
 func _get_path_name_at(tile: Vector2i) -> String:
-	return STONE_PATH_NAME if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else "Basic Path"
+	var base_name: String = STONE_PATH_NAME if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else BASIC_PATH_NAME
+	if _get_path_mask_at(tile) != 0:
+		return "%s + %s" % [base_name, BENCH_NAME]
+	return base_name
 
 
 func _get_path_cost_at(tile: Vector2i) -> int:
-	return STONE_PATH_COST if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else BASIC_PATH_COST
+	var path_cost: int = STONE_PATH_COST if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else BASIC_PATH_COST
+	return path_cost + _get_path_addon_count_at(tile) * BENCH_COST
 
 
 func _get_path_refund_at(tile: Vector2i) -> int:
@@ -410,14 +474,35 @@ func _get_path_refund_at(tile: Vector2i) -> int:
 
 
 func _get_path_variant_at(tile: Vector2i) -> int:
-	for tile_data in GameState.tiles:
-		if String(tile_data.get("type", "")) != GameState.TILE_TYPE_PATH:
-			continue
-		if int(tile_data.get("x", -1)) == tile.x and int(tile_data.get("y", -1)) == tile.y:
-			if tile_data.has("path_meta"):
-				return floori(float(maxi(0, int(tile_data.get("path_meta", 0)))) / 4.0)
-			return maxi(0, int(tile_data.get("path_variant", 0)))
-	return GameState.PATH_GRAVEL_VARIANT
+	return GameState.get_path_variant_at(tile)
+
+
+func _get_path_mask_at(tile: Vector2i) -> int:
+	return GameState.get_path_mask_at(tile)
+
+
+func _get_path_addon_count_at(tile: Vector2i) -> int:
+	var path_mask: int = _get_path_mask_at(tile)
+	var addon_count: int = 0
+	if (path_mask & GameState.PATH_BENCH_MASK_C1) != 0:
+		addon_count += 1
+	if (path_mask & GameState.PATH_BENCH_MASK_C2) != 0:
+		addon_count += 1
+	return addon_count
+
+
+func _toggle_bench_orientation() -> void:
+	if GameState.selected_path_addon_mask == GameState.PATH_BENCH_MASK_C2:
+		GameState.selected_path_addon_mask = GameState.PATH_BENCH_MASK_C1
+	else:
+		GameState.selected_path_addon_mask = GameState.PATH_BENCH_MASK_C2
+	_show_build_mode("Build: %s %s" % [BENCH_NAME, _get_bench_orientation_label()])
+	if iso_map.has_method("refresh_tiles"):
+		iso_map.refresh_tiles()
+
+
+func _get_bench_orientation_label() -> String:
+	return "(c&1)" if GameState.selected_path_addon_mask == GameState.PATH_BENCH_MASK_C1 else "(c&2)"
 
 
 func _spawn_simple_visitor() -> void:

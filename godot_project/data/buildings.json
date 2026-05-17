@@ -1,7 +1,7 @@
 {
   "buildings": {
     "basic_path": {
-      "name": "Basic Path",
+      "name": "Caminho de cascalho",
       "type": "path",
       "size": [1, 1],
       "cost": 3,
@@ -23,6 +23,17 @@
       "path_meta": 4,
       "sell_refund_ratio": 0.5,
       "placeholder_color": "#aaa48c"
+    },
+    "bench": {
+      "name": "Banco",
+      "type": "path_addon",
+      "size": [1, 1],
+      "cost": 3,
+      "jar_path_item": 2,
+      "path_mask_options": [1, 2],
+      "default_path_mask": 2,
+      "requires_path": true,
+      "placeholder_color": "#8f6742"
     },
     "water": {
       "name": "Água",
