@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cg8f0af0m2n6e"
-path="res://.godot/imported/gpack1_006.png-93bec8905750f4ed37381e3e4ab88e18.ctex"
+uid="uid://bwj86xl865ne4"
+path="res://.godot/imported/gpack1_004.png-6bcdbfdebe39007fc3e4c2affb209b83.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/original_sprites/entrance/gpack1_006.png"
-dest_files=["res://.godot/imported/gpack1_006.png-93bec8905750f4ed37381e3e4ab88e18.ctex"]
+source_file="res://assets/original_sprites/attractions/gpack1_004.png"
+dest_files=["res://.godot/imported/gpack1_004.png-6bcdbfdebe39007fc3e4c2affb209b83.ctex"]
 
 [params]
 

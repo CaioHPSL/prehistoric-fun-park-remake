@@ -9,6 +9,8 @@ signal load_requested
 var park_controller: Node
 var current_active_visitors: int = 0
 var current_served_visitors: int = 0
+var current_max_active_visitors: int = 200
+var visitor_debug_stats: Dictionary = {}
 
 @onready var money_label: Label = $TopBar/MoneyLabel
 @onready var earned_label: Label = $TopBar/EarnedLabel
@@ -74,7 +76,22 @@ func show_build_mode(mode_text: String) -> void:
 func update_visitors(active_count: int, served_count: int) -> void:
 	current_active_visitors = active_count
 	current_served_visitors = served_count
-	visitor_label.text = "Visitors: %d/%d Served: %d" % [active_count, 3, served_count]
+	if not visitor_debug_stats.is_empty():
+		current_max_active_visitors = int(visitor_debug_stats.get("max_active_visitors", current_max_active_visitors))
+	visitor_label.text = "Visitors: %d/%d Served: %d" % [active_count, current_max_active_visitors, served_count]
+	_update_stats_panel()
+
+
+func update_visitor_debug_stats(stats: Dictionary) -> void:
+	visitor_debug_stats = stats.duplicate(true)
+	current_active_visitors = int(visitor_debug_stats.get("active_visitors", current_active_visitors))
+	current_max_active_visitors = int(visitor_debug_stats.get("max_active_visitors", current_max_active_visitors))
+	current_served_visitors = int(visitor_debug_stats.get("total_visitors_served", current_served_visitors))
+	visitor_label.text = "Visitors: %d/%d Served: %d" % [
+		current_active_visitors,
+		current_max_active_visitors,
+		current_served_visitors,
+	]
 	_update_stats_panel()
 
 
@@ -85,12 +102,27 @@ func show_message(message: String) -> void:
 
 
 func _update_stats_panel() -> void:
-	stats_details_label.text = "Money: $%d\nEarned total: $%d\nSpent total: $%d\nVisitors active: %d\nServed total: %d" % [
+	var base_text: String = "Money: $%d\nEarned total: $%d\nSpent total: $%d\nVisitors active: %d/%d\nServed total: %d" % [
 		Economy.money,
 		Economy.total_earned,
 		Economy.total_spent,
 		current_active_visitors,
+		current_max_active_visitors,
 		current_served_visitors,
+	]
+	if visitor_debug_stats.is_empty():
+		stats_details_label.text = base_text
+		return
+	stats_details_label.text = "%s\nVisitors spawned: %d\nVisitors exited: %d\nSpawn attempts: %d\nSpawn successes: %d\nSpawn failures: %d\nSpawn chance: %d%%\nLast spawn block: %s\nJAR visitor slots: %d" % [
+		base_text,
+		int(visitor_debug_stats.get("total_visitors_spawned", 0)),
+		int(visitor_debug_stats.get("total_visitors_exited", 0)),
+		int(visitor_debug_stats.get("spawn_attempts", 0)),
+		int(visitor_debug_stats.get("spawn_successes", 0)),
+		int(visitor_debug_stats.get("spawn_failures", 0)),
+		roundi(float(visitor_debug_stats.get("current_spawn_chance", 0.0)) * 100.0),
+		String(visitor_debug_stats.get("last_spawn_block_reason", "none")),
+		int(visitor_debug_stats.get("visitor_slots_jar_reference", 200)),
 	]
 
 

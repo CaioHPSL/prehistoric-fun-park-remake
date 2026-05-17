@@ -21,7 +21,8 @@ script = ExtResource("7_visitors")
 visitor_scene = ExtResource("8_visitor")
 
 [node name="EntranceOverlay" type="Node2D" parent="."]
-z_index = 10
+visible = false
+z_index = 4096
 script = ExtResource("9_entrance_overlay")
 
 [node name="Camera2D" type="Camera2D" parent="."]
@@ -44,7 +45,7 @@ script = ExtResource("10_fps_counter")
 [node name="FPSLabel" type="Label" parent="DebugOverlay"]
 offset_left = 8.0
 offset_top = 8.0
-offset_right = 96.0
-offset_bottom = 31.0
+offset_right = 320.0
+offset_bottom = 112.0
 mouse_filter = 2
 text = "FPS: --"

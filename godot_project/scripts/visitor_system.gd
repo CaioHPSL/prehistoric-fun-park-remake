@@ -43,6 +43,10 @@ const ATTRACTION_INTEREST_QUEUE_PENALTY: float = 0.05
 const LOW_SATISFACTION_INTEREST_MULTIPLIER: float = 0.50
 const SPAWN_CHANCE_MIN: float = 0.03
 const SPAWN_CHANCE_MAX: float = 0.80
+const JAR_MAX_NORMAL_VISITORS: int = 200
+const VISITOR_Z_INDEX_SCALE: float = 10.0
+const VISITOR_Z_INDEX_MIN: int = -4096
+const VISITOR_Z_INDEX_MAX: int = 4095
 const STATE_ENTERING_PARK: int = -100
 const STATE_RETURNING_TO_ENTRY: int = -101
 const STATE_ROAMING: int = -1
@@ -128,13 +132,23 @@ const VISITOR_FRAMES: Array = [
 @export var debug_spawn_logs: bool = false
 @export var debug_visitor_ai_logs: bool = false
 @export var debug_visitor_state_logs: bool = false
-# The JAR has 200 normal visitor slots; the port keeps this low until rendering/depth is cheaper.
-@export var max_active_visitors: int = 3
+@export var debug_visitor_stats: bool = true
+@export var debug_disable_visitor_spawn: bool = false
+@export var max_active_visitors: int = JAR_MAX_NORMAL_VISITORS
+@export var render_visitors_in_iso_map: bool = false
 
 var iso_map: Node
 var active_visitors: Array[Node2D] = []
 var spawn_timer: Timer
+var total_visitors_spawned: int = 0
+var total_visitors_exited: int = 0
 var total_visitors_served: int = 0
+var spawn_attempts: int = 0
+var spawn_successes: int = 0
+var spawn_failures: int = 0
+var current_spawn_chance: float = 0.0
+var last_spawn_block_reason: String = "none"
+var visitor_slots_jar_reference: int = JAR_MAX_NORMAL_VISITORS
 var visitors_served_by_attraction: Dictionary = {}
 var attraction_queues: Dictionary = {}
 var attraction_active_counts: Dictionary = {}
@@ -152,6 +166,37 @@ func _ready() -> void:
 
 func configure(map_node: Node) -> void:
 	iso_map = map_node
+
+
+func set_iso_depth_renderer_enabled(enabled: bool) -> void:
+	render_visitors_in_iso_map = enabled
+	for visitor in active_visitors:
+		if is_instance_valid(visitor):
+			_apply_visitor_render_mode(visitor)
+
+
+func has_active_visitors() -> bool:
+	return not active_visitors.is_empty()
+
+
+func get_visitor_render_jobs() -> Array:
+	var jobs: Array = []
+	if not render_visitors_in_iso_map:
+		return jobs
+	for visitor in active_visitors:
+		if not is_instance_valid(visitor):
+			continue
+		var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
+		if sprite == null or sprite.texture == null or not sprite.region_enabled:
+			continue
+		jobs.append({
+			"texture": sprite.texture,
+			"region": sprite.region_rect,
+			"sprite_offset": sprite.offset,
+			"global_position": visitor.to_global(Vector2.ZERO),
+			"local_depth": _get_visitor_local_depth(visitor),
+		})
+	return jobs
 
 
 func _set_visitor_state(visitor: Node2D, state: int) -> void:
@@ -224,11 +269,13 @@ func _process(delta: float) -> void:
 			continue
 		_update_visitor_needs(visitor, delta)
 		if _process_visitor_ai(visitor, delta):
+			_update_visitor_depth(visitor)
 			continue
 		var visitor_target_position: Vector2 = visitor.get_meta("target_position", Vector2.ZERO) as Vector2
 		var is_moving: bool = visitor.position.distance_to(visitor_target_position) > 1.0
 		visitor.position = visitor.position.move_toward(visitor_target_position, _get_visitor_move_speed(visitor) * delta)
 		_update_visitor_animation(visitor, delta, is_moving)
+		_update_visitor_depth(visitor)
 		if visitor.position.distance_to(visitor_target_position) <= 1.0:
 			_advance_visitor_route(visitor)
 
@@ -245,26 +292,31 @@ func stop_spawning() -> void:
 
 
 func spawn_single_visitor() -> void:
+	spawn_attempts += 1
 	_log_spawn("tick")
 	_log_spawn("active/max = %d/%d" % [active_visitors.size(), max_active_visitors])
+	if debug_disable_visitor_spawn:
+		_record_spawn_failure("spawn desativado por debug")
+		return
 	if active_visitors.size() >= max_active_visitors:
-		_log_spawn("blocked reason = limite ativo")
+		_record_spawn_failure("limite ativo")
 		return
 	if iso_map == null:
-		_log_spawn("blocked reason = iso_map ausente")
+		_record_spawn_failure("iso_map ausente")
 		return
 	var target_origin: Vector2i = _find_reachable_attraction_origin()
 	var spawn_probability: float = _calculate_spawn_chance(target_origin != Vector2i(-1, -1))
+	current_spawn_chance = spawn_probability
 	_log_spawn("accessible_attraction = %s" % [str(target_origin != Vector2i(-1, -1))])
 	_log_spawn("target_origin = %s" % [str(target_origin)])
 	_log_spawn("chance = %.2f" % spawn_probability)
 	if spawn_probability <= 0.0:
-		_log_spawn("blocked reason = sem atracao acessivel")
+		_record_spawn_failure("sem atracao acessivel")
 		return
 	var spawn_roll: float = randf()
 	_log_spawn("roll = %.2f" % spawn_roll)
 	if spawn_roll >= spawn_probability:
-		_log_spawn("blocked reason = roll falhou")
+		_record_spawn_failure("roll falhou")
 		return
 	var visitor: Node2D = _create_visitor()
 	add_child(visitor)
@@ -301,6 +353,10 @@ func spawn_single_visitor() -> void:
 	_set_visitor_state(visitor, STATE_ENTERING_PARK)
 	_update_visitor_direction(visitor, Vector2i(0, 1))
 	active_visitors.append(visitor)
+	_update_visitor_depth(visitor)
+	total_visitors_spawned += 1
+	spawn_successes += 1
+	last_spawn_block_reason = "spawned"
 	_log_spawn("spawned visitor at %s" % [str(target_origin)])
 	_emit_visitor_stats()
 
@@ -317,7 +373,7 @@ func _process_visitor_ai(visitor: Node2D, delta: float) -> bool:
 		_update_bench_use(visitor, delta)
 		return true
 	if state == STATE_USING_SERVICE:
-		_update_placeholder_timed_state(visitor, delta)
+		_update_service_use(visitor, delta)
 		return true
 	if state == STATE_SPECIAL_WATER_INTERACTION:
 		_update_placeholder_timed_state(visitor, delta)
@@ -333,6 +389,13 @@ func _calculate_spawn_chance(has_reachable_attraction: bool) -> float:
 		return 0.0
 	# The JAR computes a dynamic aU and clamps it to 3..80; this port keeps the exported base chance until the full park attractiveness model exists.
 	return clampf(spawn_chance, SPAWN_CHANCE_MIN, SPAWN_CHANCE_MAX)
+
+
+func _record_spawn_failure(reason: String) -> void:
+	spawn_failures += 1
+	last_spawn_block_reason = reason
+	_log_spawn("blocked reason = %s" % reason)
+	_emit_visitor_stats()
 
 
 func _create_initial_satisfaction() -> int:
@@ -385,6 +448,7 @@ func clear_visitor() -> void:
 	attraction_queues.clear()
 	attraction_active_counts.clear()
 	attraction_queue_anchor_tiles.clear()
+	_reset_visitor_counters()
 	_emit_visitor_stats()
 
 
@@ -416,6 +480,34 @@ func get_total_visitors_served() -> int:
 	return total_visitors_served
 
 
+func get_total_visitors_spawned() -> int:
+	return total_visitors_spawned
+
+
+func get_total_visitors_exited() -> int:
+	return total_visitors_exited
+
+
+func get_visitor_debug_stats() -> Dictionary:
+	return {
+		"active_visitors": active_visitors.size(),
+		"max_active_visitors": max_active_visitors,
+		"visitor_slots_jar_reference": visitor_slots_jar_reference,
+		"total_visitors_spawned": total_visitors_spawned,
+		"total_visitors_exited": total_visitors_exited,
+		"total_visitors_served": total_visitors_served,
+		"spawn_attempts": spawn_attempts,
+		"spawn_successes": spawn_successes,
+		"spawn_failures": spawn_failures,
+		"current_spawn_chance": current_spawn_chance,
+		"last_spawn_block_reason": last_spawn_block_reason,
+		"require_accessible_attraction_for_spawn": require_accessible_attraction_for_spawn,
+		"debug_visitor_stats": debug_visitor_stats,
+		"debug_disable_visitor_spawn": debug_disable_visitor_spawn,
+		"render_visitors_in_iso_map": render_visitors_in_iso_map,
+	}
+
+
 func get_visitors_served_for_attraction(origin: Vector2i) -> int:
 	return int(visitors_served_by_attraction.get(_attraction_key(origin), 0))
 
@@ -427,6 +519,17 @@ func get_visitors_served_by_attraction() -> Dictionary:
 func set_total_visitors_served(served_count: int) -> void:
 	total_visitors_served = served_count
 	_emit_visitor_stats()
+
+
+func _reset_visitor_counters() -> void:
+	total_visitors_spawned = 0
+	total_visitors_exited = 0
+	total_visitors_served = 0
+	spawn_attempts = 0
+	spawn_successes = 0
+	spawn_failures = 0
+	current_spawn_chance = 0.0
+	last_spawn_block_reason = "none"
 
 
 func set_visitors_served_by_attraction(saved_counts: Dictionary) -> void:
@@ -442,6 +545,7 @@ func _create_visitor() -> Node2D:
 			var scene_visitor: Node2D = instance as Node2D
 			_apply_visitor_visual_variation(scene_visitor)
 			_reset_visitor_animation(scene_visitor)
+			_apply_visitor_render_mode(scene_visitor)
 			return scene_visitor
 		instance.queue_free()
 	var visitor: Node2D = Node2D.new()
@@ -449,7 +553,32 @@ func _create_visitor() -> Node2D:
 	shape.color = Color(0.15, 0.75, 1.0, 1.0)
 	shape.polygon = PackedVector2Array([Vector2(0, -8), Vector2(6, 4), Vector2(-6, 4)])
 	visitor.add_child(shape)
+	_apply_visitor_render_mode(visitor)
 	return visitor
+
+
+func _apply_visitor_render_mode(visitor: Node2D) -> void:
+	var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
+	if sprite == null:
+		visitor.visible = true
+		return
+	visitor.visible = not render_visitors_in_iso_map
+	_update_visitor_depth(visitor)
+
+
+func _get_visitor_local_depth(visitor: Node2D) -> int:
+	var queue_index: int = int(visitor.get_meta("queue_index", -1))
+	if queue_index >= 0:
+		return queue_index
+	var current_tile: Vector2i = visitor.get_meta("current_tile", GameState.ENTRY_TILE) as Vector2i
+	var target_tile: Vector2i = visitor.get_meta("target_tile", current_tile) as Vector2i
+	return int(current_tile.x + current_tile.y + target_tile.x + target_tile.y)
+
+
+func _update_visitor_depth(visitor: Node2D) -> void:
+	# Fallback for builds that still draw visitors as Node2D children instead of IsoMap high jobs.
+	var depth := int(round((visitor.position.y + visitor.position.x * 0.01) * VISITOR_Z_INDEX_SCALE))
+	visitor.z_index = clampi(depth, VISITOR_Z_INDEX_MIN, VISITOR_Z_INDEX_MAX)
 
 
 func _apply_visitor_visual_variation(visitor: Node2D) -> void:
@@ -720,6 +849,8 @@ func _should_visit_attraction(visitor: Node2D, building_data: Dictionary) -> boo
 	var origin: Vector2i = _get_building_origin(building_data)
 	if origin == Vector2i(-1, -1):
 		return false
+	if _get_attraction_capacity(origin) <= 0:
+		return false
 	if int(visitor.get_meta("visitor_money", 0)) < _get_attraction_ticket_price(origin):
 		return false
 	var queue_size: int = _get_attraction_queue_size(origin)
@@ -889,13 +1020,65 @@ func _try_start_bench_use(visitor: Node2D) -> bool:
 
 
 func _try_start_service_use(_visitor: Node2D) -> bool:
-	# W=12 is confirmed in the JAR, but services are not represented in the current port data yet.
+	var service_data: Dictionary = _find_nearby_usable_service(_visitor)
+	if service_data.is_empty() or not _should_use_service(_visitor, service_data):
+		return false
+	return _start_service_use(_visitor, service_data)
+
+
+func _find_nearby_usable_service(_visitor: Node2D) -> Dictionary:
+	# W=12 is confirmed in the JAR, but service buildings are not represented in the current port data yet.
+	return {}
+
+
+func _should_use_service(_visitor: Node2D, _service_data: Dictionary) -> bool:
 	return false
+
+
+func _start_service_use(visitor: Node2D, _service_data: Dictionary) -> bool:
+	visitor.set_meta("state_time_remaining", 0.0)
+	_set_visitor_state(visitor, STATE_USING_SERVICE)
+	return true
+
+
+func _update_service_use(visitor: Node2D, delta: float) -> void:
+	var remaining_time: float = float(visitor.get_meta("state_time_remaining", 0.0)) - delta
+	visitor.set_meta("state_time_remaining", remaining_time)
+	_update_visitor_animation(visitor, delta, false)
+	if remaining_time <= 0.0:
+		_finish_service_use(visitor)
+
+
+func _finish_service_use(visitor: Node2D) -> void:
+	visitor.set_meta("state_time_remaining", 0.0)
+	_set_visitor_state(visitor, STATE_ROAMING)
+	if not _recalculate_next_step(visitor):
+		var current_tile: Vector2i = visitor.get_meta("current_tile", GameState.ENTRY_TILE) as Vector2i
+		_send_visitor_to_exit_after_attraction(visitor, current_tile)
 
 
 func _try_start_social_interaction(_visitor: Node2D) -> bool:
 	# W=15/16/17 require the JAR's social pairing rules from dk()/later social helpers; keep the hooks inert for now.
-	return false
+	var partner: Node2D = _find_social_partner(_visitor)
+	if partner == null:
+		return false
+	return _start_social_interaction(_visitor, partner)
+
+
+func _find_social_partner(_visitor: Node2D) -> Node2D:
+	return null
+
+
+func _start_social_interaction(visitor: Node2D, partner: Node2D) -> bool:
+	if partner == null:
+		return false
+	visitor.set_meta("social_partner", partner.get_instance_id())
+	partner.set_meta("social_partner", visitor.get_instance_id())
+	visitor.set_meta("state_time_remaining", 0.0)
+	partner.set_meta("state_time_remaining", 0.0)
+	_set_visitor_state(visitor, STATE_SOCIAL_PRIMARY)
+	_set_visitor_state(partner, STATE_SOCIAL_SECONDARY)
+	return true
 
 
 func _update_bench_use(visitor: Node2D, delta: float) -> void:
@@ -1077,6 +1260,7 @@ func _refresh_queue_positions(origin: Vector2i) -> void:
 		visitor.position = queue_position
 		visitor.set_meta("target_position", queue_position)
 		_reset_visitor_animation(visitor)
+		_update_visitor_depth(visitor)
 	attraction_queues[key] = queue
 
 
@@ -1186,9 +1370,9 @@ func _log_visitor_state(visitor: Node2D, message: String) -> void:
 func _is_supported_attraction_building(building_data: Dictionary) -> bool:
 	if String(building_data.get("id", "")) == "basic_attraction":
 		return true
-	if int(building_data.get("jar_type", -1)) == 6:
+	if int(building_data.get("jar_type", -1)) >= 0 and int(building_data.get("jar_type", -1)) <= 23:
 		return true
-	return String(building_data.get("type", "")) == "attraction"
+	return String(building_data.get("type", "")) == "attraction" or String(building_data.get("category", "")) == "attraction"
 
 
 func _get_building_debug_name(building_data: Dictionary) -> String:
@@ -1221,6 +1405,8 @@ func _get_basic_attraction_data(origin: Vector2i) -> Dictionary:
 
 
 func _get_adjacent_path_tiles(building_data: Dictionary) -> Array:
+	if GameState.has_method("get_adjacent_path_tiles_for_building"):
+		return GameState.get_adjacent_path_tiles_for_building(building_data)
 	var targets: Array = []
 	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
 	var size: Vector2i = Vector2i(int(building_data.get("width", 1)), int(building_data.get("height", 1)))
@@ -1334,7 +1520,7 @@ func _get_attraction_ticket_price(origin: Vector2i) -> int:
 
 func _get_attraction_capacity(origin: Vector2i) -> int:
 	var catalog_data: Dictionary = _get_attraction_catalog_data(origin)
-	return maxi(1, int(catalog_data.get("visitor_capacity", 1)))
+	return maxi(0, int(catalog_data.get("visitor_capacity", 1)))
 
 
 func _get_attraction_use_duration(origin: Vector2i) -> float:
@@ -1361,6 +1547,8 @@ func _get_attraction_catalog_data(origin: Vector2i) -> Dictionary:
 
 func _finish_visit(visitor: Node2D) -> void:
 	active_visitors.erase(visitor)
+	total_visitors_exited += 1
+	_log_visitor_ai(visitor, "exited park")
 	visitor.queue_free()
 	_emit_visitor_stats()
 

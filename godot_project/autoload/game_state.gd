@@ -22,6 +22,7 @@ const PATH_BENCH_MASK_C2: int = 2
 const PATH_BENCH_DEFAULT_MASK: int = PATH_BENCH_MASK_C2
 const BASIC_ATTRACTION_SIZE: Vector2i = Vector2i(3, 3)
 const BASIC_ATTRACTION_JAR_TYPE: int = 6
+const BASIC_ATTRACTION_ID: String = "basic_attraction"
 
 var map_width: int = DEFAULT_MAP_WIDTH
 var map_height: int = DEFAULT_MAP_HEIGHT
@@ -262,33 +263,64 @@ func can_place_area(origin: Vector2i, size: Vector2i) -> bool:
 	return true
 
 
-func add_basic_attraction(origin: Vector2i) -> bool:
-	var size: Vector2i = BASIC_ATTRACTION_SIZE
-	if not can_place_area(origin, size):
+func can_place_building(catalog_id: String, origin: Vector2i) -> bool:
+	var catalog_data: Dictionary = Catalog.get_building(catalog_id)
+	if catalog_data.is_empty():
 		return false
+	var occupied_offsets: Array = get_catalog_occupied_offsets(catalog_data)
+	if occupied_offsets.is_empty():
+		return false
+	for offset_entry in occupied_offsets:
+		var offset: Vector2i = offset_entry
+		var checked_tile: Vector2i = origin + offset
+		if not is_inside_map(checked_tile) or is_tile_used(checked_tile) or is_tile_reserved(checked_tile):
+			return false
+	return true
+
+
+func add_basic_attraction(origin: Vector2i) -> bool:
+	return add_attraction(BASIC_ATTRACTION_ID, origin)
+
+
+func add_attraction(catalog_id: String, origin: Vector2i) -> bool:
+	var catalog_data: Dictionary = Catalog.get_building(catalog_id)
+	if catalog_data.is_empty() or String(catalog_data.get("type", "")) != TILE_TYPE_ATTRACTION:
+		return false
+	if not can_place_building(catalog_id, origin):
+		return false
+	var size: Vector2i = _get_catalog_size(catalog_data)
 	buildings.append({
-		"id": "basic_attraction",
-		"jar_type": BASIC_ATTRACTION_JAR_TYPE,
+		"id": catalog_id,
+		"name": String(catalog_data.get("name", catalog_id)),
+		"type": TILE_TYPE_ATTRACTION,
+		"category": String(catalog_data.get("category", TILE_TYPE_ATTRACTION)),
+		"jar_type": int(catalog_data.get("jar_type", -1)),
 		"x": origin.x,
 		"y": origin.y,
 		"width": size.x,
 		"height": size.y,
+		"orientation": 0,
+		"served_count": 0,
 	})
-	for x in range(origin.x, origin.x + size.x):
-		for y in range(origin.y, origin.y + size.y):
-			clear_terrain_decor(Vector2i(x, y))
-			tiles.append({
-				"x": x,
-				"y": y,
-				"type": TILE_TYPE_ATTRACTION,
-			})
+	for offset_entry in get_catalog_occupied_offsets(catalog_data):
+		var offset: Vector2i = offset_entry
+		var occupied_tile: Vector2i = origin + offset
+		clear_terrain_decor(occupied_tile)
+		tiles.append({
+			"x": occupied_tile.x,
+			"y": occupied_tile.y,
+			"type": TILE_TYPE_ATTRACTION,
+			"building_id": catalog_id,
+			"origin_x": origin.x,
+			"origin_y": origin.y,
+		})
 	return true
 
 
 func get_first_basic_attraction() -> Dictionary:
 	for building_entry in buildings:
 		var building_data: Dictionary = building_entry
-		if String(building_data.get("id", "")) == "basic_attraction":
+		if String(building_data.get("id", "")) == BASIC_ATTRACTION_ID:
 			return building_data
 	return {}
 
@@ -296,7 +328,7 @@ func get_first_basic_attraction() -> Dictionary:
 func get_first_connected_basic_attraction() -> Dictionary:
 	for building_entry in buildings:
 		var building_data: Dictionary = building_entry
-		if String(building_data.get("id", "")) == "basic_attraction" and is_basic_attraction_connected_to_path(building_data):
+		if String(building_data.get("id", "")) == BASIC_ATTRACTION_ID and is_basic_attraction_connected_to_path(building_data):
 			return building_data
 	return {}
 
@@ -304,7 +336,7 @@ func get_first_connected_basic_attraction() -> Dictionary:
 func has_basic_attraction(origin: Vector2i) -> bool:
 	for building_entry in buildings:
 		var building_data: Dictionary = building_entry
-		if String(building_data.get("id", "")) != "basic_attraction":
+		if String(building_data.get("id", "")) != BASIC_ATTRACTION_ID:
 			continue
 		if int(building_data.get("x", -1)) == origin.x and int(building_data.get("y", -1)) == origin.y:
 			return true
@@ -312,55 +344,126 @@ func has_basic_attraction(origin: Vector2i) -> bool:
 
 
 func has_connected_basic_attraction(origin: Vector2i) -> bool:
-	for building_entry in buildings:
-		var building_data: Dictionary = building_entry
-		if String(building_data.get("id", "")) != "basic_attraction":
-			continue
-		if int(building_data.get("x", -1)) == origin.x and int(building_data.get("y", -1)) == origin.y:
-			return is_basic_attraction_connected_to_path(building_data)
-	return false
+	return has_connected_attraction(origin)
+
+
+func has_connected_attraction(origin: Vector2i) -> bool:
+	var building_data: Dictionary = get_attraction_building_at(origin)
+	if building_data.is_empty():
+		return false
+	return is_basic_attraction_connected_to_path(building_data)
 
 
 func get_basic_attraction_origin_at(tile: Vector2i) -> Vector2i:
+	return get_attraction_origin_at(tile)
+
+
+func get_attraction_origin_at(tile: Vector2i) -> Vector2i:
+	var building_data: Dictionary = get_attraction_building_at(tile)
+	if building_data.is_empty():
+		return Vector2i(-1, -1)
+	return Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+
+
+func get_attraction_building_at(tile: Vector2i) -> Dictionary:
 	for building_entry in buildings:
 		var building_data: Dictionary = building_entry
-		if String(building_data.get("id", "")) != "basic_attraction":
+		if String(building_data.get("type", "")) != TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != TILE_TYPE_ATTRACTION and String(building_data.get("id", "")) != BASIC_ATTRACTION_ID:
 			continue
 		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
-		var size: Vector2i = Vector2i(int(building_data.get("width", 1)), int(building_data.get("height", 1)))
-		if tile.x >= origin.x and tile.y >= origin.y and tile.x < origin.x + size.x and tile.y < origin.y + size.y:
-			return origin
-	return Vector2i(-1, -1)
+		var catalog_data: Dictionary = Catalog.get_building(String(building_data.get("id", BASIC_ATTRACTION_ID)))
+		for offset_entry in get_catalog_occupied_offsets(catalog_data):
+			if origin + (offset_entry as Vector2i) == tile:
+				return building_data
+	return {}
 
 
 func is_basic_attraction_connected_to_path(building_data: Dictionary) -> bool:
-	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
-	var size: Vector2i = Vector2i(int(building_data.get("width", 1)), int(building_data.get("height", 1)))
-	for x in range(origin.x, origin.x + size.x):
-		if get_tile_type(Vector2i(x, origin.y - 1)) == TILE_TYPE_PATH:
-			return true
-		if get_tile_type(Vector2i(x, origin.y + size.y)) == TILE_TYPE_PATH:
-			return true
-	for y in range(origin.y, origin.y + size.y):
-		if get_tile_type(Vector2i(origin.x - 1, y)) == TILE_TYPE_PATH:
-			return true
-		if get_tile_type(Vector2i(origin.x + size.x, y)) == TILE_TYPE_PATH:
+	for path_tile in get_adjacent_path_tiles_for_building(building_data):
+		if get_tile_type(path_tile) == TILE_TYPE_PATH:
 			return true
 	return false
 
 
 func remove_basic_attraction_at(tile: Vector2i) -> bool:
+	return remove_attraction_at(tile)
+
+
+func remove_attraction_at(tile: Vector2i) -> bool:
 	for i in range(buildings.size() - 1, -1, -1):
 		var building_data: Dictionary = buildings[i]
-		if String(building_data.get("id", "")) != "basic_attraction":
+		if String(building_data.get("type", "")) != TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != TILE_TYPE_ATTRACTION and String(building_data.get("id", "")) != BASIC_ATTRACTION_ID:
 			continue
 		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
-		var size: Vector2i = Vector2i(int(building_data.get("width", 1)), int(building_data.get("height", 1)))
-		if tile.x >= origin.x and tile.y >= origin.y and tile.x < origin.x + size.x and tile.y < origin.y + size.y:
+		var catalog_data: Dictionary = Catalog.get_building(String(building_data.get("id", BASIC_ATTRACTION_ID)))
+		var occupied_offsets: Array = get_catalog_occupied_offsets(catalog_data)
+		var contains_tile: bool = false
+		for offset_entry in occupied_offsets:
+			if origin + (offset_entry as Vector2i) == tile:
+				contains_tile = true
+				break
+		if contains_tile:
 			buildings.remove_at(i)
-			_remove_tiles_in_area(origin, size, TILE_TYPE_ATTRACTION)
+			_remove_attraction_tiles(origin, occupied_offsets)
 			return true
 	return false
+
+
+func get_catalog_occupied_offsets(catalog_data: Dictionary) -> Array:
+	var offsets: Array = []
+	var size: Vector2i = _get_catalog_size(catalog_data)
+	var footprint_codes: Array = catalog_data.get("footprint_codes", []) as Array
+	if footprint_codes.size() < size.x * size.y:
+		for x in range(size.x):
+			for y in range(size.y):
+				offsets.append(Vector2i(x, y))
+		return offsets
+	for x in range(size.x):
+		for y in range(size.y):
+			var code_index: int = x * size.y + y
+			if int(footprint_codes[code_index]) != 1:
+				offsets.append(Vector2i(x, y))
+	return offsets
+
+
+func get_adjacent_path_tiles_for_building(building_data: Dictionary) -> Array:
+	var targets: Array = []
+	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var catalog_data: Dictionary = Catalog.get_building(String(building_data.get("id", BASIC_ATTRACTION_ID)))
+	var occupied_tiles: Dictionary = {}
+	for offset_entry in get_catalog_occupied_offsets(catalog_data):
+		var occupied_tile: Vector2i = origin + (offset_entry as Vector2i)
+		occupied_tiles[_tile_key(occupied_tile)] = true
+	for occupied_key in occupied_tiles.keys():
+		var parts: PackedStringArray = String(occupied_key).split(",")
+		var occupied_tile: Vector2i = Vector2i(int(parts[0]), int(parts[1]))
+		for direction in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var neighbor: Vector2i = occupied_tile + direction
+			if occupied_tiles.has(_tile_key(neighbor)):
+				continue
+			if get_tile_type(neighbor) == TILE_TYPE_PATH and not targets.has(neighbor):
+				targets.append(neighbor)
+	return targets
+
+
+func _get_catalog_size(catalog_data: Dictionary) -> Vector2i:
+	var size_data: Array = catalog_data.get("size", [1, 1]) as Array
+	return Vector2i(int(size_data[0]), int(size_data[1]))
+
+
+func _remove_attraction_tiles(origin: Vector2i, occupied_offsets: Array) -> void:
+	var occupied_keys: Dictionary = {}
+	for offset_entry in occupied_offsets:
+		occupied_keys[_tile_key(origin + (offset_entry as Vector2i))] = true
+	for i in range(tiles.size() - 1, -1, -1):
+		var tile_data: Dictionary = tiles[i]
+		var tile: Vector2i = Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
+		if String(tile_data.get("type", "")) == TILE_TYPE_ATTRACTION and occupied_keys.has(_tile_key(tile)):
+			tiles.remove_at(i)
+
+
+func _tile_key(tile: Vector2i) -> String:
+	return "%d,%d" % [tile.x, tile.y]
 
 
 func _remove_tiles_in_area(origin: Vector2i, size: Vector2i, tile_type: String) -> void:
@@ -411,6 +514,7 @@ func from_save_data(data: Dictionary) -> void:
 		terrain_decor_codes = saved_terrain_decor_codes as Array
 	_ensure_terrain_decor_codes()
 	buildings = data.get("buildings", [])
+	_ensure_building_defaults()
 	visitors = data.get("visitors", [])
 	Economy.money = int(data.get("money", Economy.initial_money))
 	Economy.total_earned = int(data.get("total_earned", 0))
@@ -431,6 +535,31 @@ func _ensure_path_metadata_defaults() -> void:
 				path_mask = clampi(path_mask, 0, 3)
 				path_meta = _compose_path_meta(path_variant, path_mask)
 			_set_path_metadata(tile_data, _path_variant_from_meta(path_meta), _path_mask_from_meta(path_meta))
+
+
+func _ensure_building_defaults() -> void:
+	for building_entry in buildings:
+		var building_data: Dictionary = building_entry
+		var catalog_id: String = String(building_data.get("id", BASIC_ATTRACTION_ID))
+		if catalog_id == "":
+			catalog_id = BASIC_ATTRACTION_ID
+			building_data["id"] = catalog_id
+		var catalog_data: Dictionary = Catalog.get_building(catalog_id)
+		if catalog_data.is_empty() and int(building_data.get("jar_type", -1)) == BASIC_ATTRACTION_JAR_TYPE:
+			catalog_id = BASIC_ATTRACTION_ID
+			catalog_data = Catalog.get_building(catalog_id)
+			building_data["id"] = catalog_id
+		if catalog_data.is_empty():
+			continue
+		var size: Vector2i = _get_catalog_size(catalog_data)
+		building_data["type"] = String(catalog_data.get("type", TILE_TYPE_ATTRACTION))
+		building_data["category"] = String(catalog_data.get("category", building_data.get("type", "")))
+		building_data["name"] = String(catalog_data.get("name", catalog_id))
+		building_data["jar_type"] = int(catalog_data.get("jar_type", building_data.get("jar_type", -1)))
+		building_data["width"] = int(building_data.get("width", size.x))
+		building_data["height"] = int(building_data.get("height", size.y))
+		building_data["orientation"] = int(building_data.get("orientation", 0))
+		building_data["served_count"] = int(building_data.get("served_count", 0))
 
 
 func _remove_reserved_path_tiles() -> void:
