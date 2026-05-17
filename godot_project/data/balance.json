@@ -2,9 +2,12 @@
   "map_width": 30,
   "map_height": 30,
   "initial_money": 2000,
-  "basic_path_cost": 10,
-  "basic_attraction_cost": 250,
-  "basic_attraction_profit": 25,
+  "basic_path_cost": 3,
+  "stone_path_cost": 6,
+  "water_cost": 10,
+  "basic_attraction_cost": 30,
+  "basic_attraction_ticket_price": 1,
+  "basic_attraction_satisfaction": 5,
   "visitor_spawn_seconds": 5.0,
   "sell_refund_ratio": 0.5
 }

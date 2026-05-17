@@ -6,11 +6,20 @@ signal tile_touched(tile: Vector2i)
 signal selection_cleared
 
 const PATH_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_002.png")
-const ENTRANCE_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_006.png")
+const WATER_TEXTURE: Texture2D = preload("res://assets/original_sprites/path/gpack1_005.png")
+const ENTRANCE_TEXTURE: Texture2D = preload("res://assets/original_sprites/entrance/gpack1_006.png")
 const PATH_TEXTURE_REGION_0: Rect2 = Rect2(0.0, 104.0, 38.0, 20.0)
 const PATH_TEXTURE_REGION_1: Rect2 = Rect2(38.0, 104.0, 38.0, 20.0)
 const PATH_BORDER_REGION_A: Rect2 = Rect2(76.0, 111.0, 23.0, 13.0)
 const PATH_BORDER_REGION_B: Rect2 = Rect2(98.0, 111.0, 23.0, 13.0)
+const WATER_ANIMATION_SECONDS: float = 0.25
+const WATER_TEXTURE_REGIONS: Array[Rect2] = [
+	Rect2(0.0, 0.0, 38.0, 20.0),
+	Rect2(0.0, 19.0, 38.0, 20.0),
+	Rect2(0.0, 38.0, 38.0, 20.0),
+]
+const WATER_EDGE_REGION_A: Rect2 = Rect2(48.0, 29.0, 24.0, 18.0)
+const WATER_EDGE_REGION_B: Rect2 = Rect2(48.0, 47.0, 24.0, 18.0)
 const EXTERNAL_WALL_REGION_A: Rect2 = Rect2(0.0, 28.0, 27.0, 20.0)
 const EXTERNAL_WALL_REGION_B: Rect2 = Rect2(0.0, 48.0, 27.0, 20.0)
 const EXTERNAL_CORNER_REGION_A: Rect2 = Rect2(27.0, 29.0, 21.0, 17.0)
@@ -20,10 +29,25 @@ const ENTRANCE_ROCK_REGION: Rect2 = Rect2(0.0, 112.0, 15.0, 12.0)
 const ENTRANCE_SIGN_REGION_A: Rect2 = Rect2(90.0, 83.0, 15.0, 20.0)
 const ENTRANCE_SIGN_REGION_B: Rect2 = Rect2(105.0, 84.0, 18.0, 13.0)
 const TERRAIN_TEXTURE: Texture2D = preload("res://assets/original_sprites/terrain/gpack2_000.png")
+const NATURAL_DECOR_TEXTURE: Texture2D = preload("res://assets/original_sprites/decor/gpack1_003.png")
 const TERRAIN_TEXTURE_REGIONS: Array[Rect2] = [
 	Rect2(0.0, 0.0, 38.0, 20.0),
 	Rect2(0.0, 20.0, 38.0, 20.0),
 	Rect2(0.0, 40.0, 38.0, 20.0),
+]
+const NATURAL_DECOR_PIECES: Array = [
+	[[Rect2(52.0, 0.0, 15.0, 33.0), Vector2(15.0, -20.0)]],
+	[[Rect2(36.0, 0.0, 16.0, 34.0), Vector2(9.0, -22.0)]],
+	[[Rect2(41.0, 16.0, 11.0, 18.0), Vector2(14.0, -6.0)], [Rect2(62.0, 38.0, 18.0, 17.0), Vector2(9.0, -19.0)]],
+	[[Rect2(52.0, 14.0, 11.0, 19.0), Vector2(15.0, -6.0)], [Rect2(80.0, 37.0, 19.0, 18.0), Vector2(13.0, -18.0)]],
+	[[Rect2(36.0, 0.0, 31.0, 34.0), Vector2(3.0, -19.0)]],
+	[[Rect2(36.0, 0.0, 16.0, 34.0), Vector2(3.0, -19.0)], [Rect2(52.0, 14.0, 11.0, 19.0), Vector2(20.0, -6.0)], [Rect2(80.0, 37.0, 19.0, 18.0), Vector2(18.0, -18.0)]],
+	[[Rect2(41.0, 16.0, 11.0, 18.0), Vector2(8.0, -6.0)], [Rect2(62.0, 38.0, 18.0, 17.0), Vector2(3.0, -19.0)], [Rect2(52.0, 0.0, 15.0, 33.0), Vector2(20.0, -20.0)]],
+	[[Rect2(41.0, 16.0, 11.0, 18.0), Vector2(8.0, -6.0)], [Rect2(62.0, 38.0, 18.0, 17.0), Vector2(3.0, -19.0)], [Rect2(52.0, 14.0, 11.0, 19.0), Vector2(20.0, -6.0)], [Rect2(80.0, 37.0, 19.0, 18.0), Vector2(18.0, -18.0)]],
+	[[Rect2(67.0, 0.0, 40.0, 37.0), Vector2(-2.0, -20.0)]],
+	[[Rect2(0.0, 0.0, 36.0, 37.0), Vector2(0.0, -20.0)]],
+	[[Rect2(0.0, 37.0, 26.0, 18.0), Vector2(6.0, -2.0)]],
+	[[Rect2(27.0, 34.0, 35.0, 22.0), Vector2(1.0, -5.0)]],
 ]
 const TERRAIN_BASE_COLOR: Color = Color(0.27, 0.53, 0.16, 1.0)
 
@@ -39,10 +63,22 @@ var _press_active := false
 var _press_position := Vector2.ZERO
 var _press_moved := false
 var _active_touch_index := -1
+var _water_frame: int = 0
+var _water_frame_timer: float = 0.0
 
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+
+func _process(delta: float) -> void:
+	_water_frame_timer += delta
+	if _water_frame_timer < WATER_ANIMATION_SECONDS:
+		return
+	_water_frame_timer = 0.0
+	if GameState.has_water_tiles():
+		_water_frame = (_water_frame + 1) % WATER_TEXTURE_REGIONS.size()
+		queue_redraw()
 
 
 func configure(width: int, height: int) -> void:
@@ -173,7 +209,7 @@ func _update_preview_from_screen_position(screen_position: Vector2) -> void:
 
 func _is_build_preview_active() -> bool:
 	return GameState.current_mode == "build" and (
-		GameState.selected_catalog_id == "basic_path" or GameState.selected_catalog_id == "basic_attraction"
+		GameState.selected_catalog_id == "basic_path" or GameState.selected_catalog_id == "stone_path" or GameState.selected_catalog_id == "water" or GameState.selected_catalog_id == "basic_attraction"
 	)
 
 
@@ -182,12 +218,14 @@ func _draw() -> void:
 	for x in range(map_width):
 		for y in range(map_height):
 			_draw_terrain_tile(Vector2i(x, y))
+	_draw_natural_decor_tiles()
 
 	_draw_external_road()
 	_draw_external_border()
+	_draw_entrance()
+	_draw_water_tiles()
 	_draw_path_tiles()
 	_draw_attraction_tiles()
-	_draw_entrance()
 
 	if is_inside_map(selected_tile):
 		_draw_selected_tile()
@@ -218,6 +256,32 @@ func _get_terrain_texture_region(tile: Vector2i) -> Rect2:
 	return TERRAIN_TEXTURE_REGIONS[terrain_code - 1]
 
 
+func _draw_natural_decor_tiles() -> void:
+	for x in range(map_width):
+		for y in range(map_height):
+			var tile: Vector2i = Vector2i(x, y)
+			var decor_code: int = GameState.get_terrain_decor_code(tile)
+			if decor_code > 0:
+				_draw_natural_decor_tile(tile, decor_code)
+
+
+func _draw_natural_decor_tile(tile: Vector2i, decor_code: int) -> void:
+	var decor_index: int = decor_code - 1
+	if decor_index < 0 or decor_index >= NATURAL_DECOR_PIECES.size():
+		return
+	var base_position: Vector2 = tile_to_screen(tile) + Vector2(tile_width * -0.5, 0.0)
+	var decor_pieces: Array = NATURAL_DECOR_PIECES[decor_index] as Array
+	for piece_entry in decor_pieces:
+		var piece: Array = piece_entry as Array
+		var source_region: Rect2 = piece[0] as Rect2
+		var offset: Vector2 = piece[1] as Vector2
+		draw_texture_rect_region(
+			NATURAL_DECOR_TEXTURE,
+			Rect2((base_position + offset).round(), source_region.size),
+			source_region
+		)
+
+
 func _draw_external_ground() -> void:
 	for x in range(-1, map_width + 1):
 		_draw_external_tile(TERRAIN_TEXTURE, Vector2i(x, -1), TERRAIN_TEXTURE_REGIONS[0], Vector2.ZERO)
@@ -229,13 +293,15 @@ func _draw_external_ground() -> void:
 
 func _draw_external_road() -> void:
 	var entry_tile: Vector2i = GameState.ENTRY_TILE
-	var road_tiles: Array[Vector2i] = [entry_tile]
+	_draw_entry_path_tile(entry_tile)
 	for road_y in range(-1, -EXTERNAL_ENTRY_ROAD_LENGTH - 1, -1):
-		road_tiles.append(Vector2i(entry_tile.x, road_y))
-	for road_tile in road_tiles:
-		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_TEXTURE_REGION_0, Vector2.ZERO)
-		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
-		_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
+		_draw_external_road_tile(Vector2i(entry_tile.x, road_y))
+
+
+func _draw_external_road_tile(road_tile: Vector2i) -> void:
+	_draw_external_tile(PATH_TEXTURE, road_tile, PATH_TEXTURE_REGION_0, Vector2.ZERO)
+	_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
+	_draw_external_tile(PATH_TEXTURE, road_tile, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
 
 
 func _draw_external_border() -> void:
@@ -267,12 +333,25 @@ func _draw_external_tile(texture: Texture2D, tile: Vector2i, source_region: Rect
 	draw_texture_rect_region(texture, target_rect, source_region)
 
 
+func _draw_entry_path_tile(tile: Vector2i) -> void:
+	if not is_inside_map(tile):
+		return
+	var top: Vector2 = tile_to_screen(tile)
+	var target_rect: Rect2 = Rect2(
+		top + Vector2(tile_width * -0.5, 0.0),
+		Vector2(tile_width, tile_height)
+	)
+	draw_texture_rect_region(PATH_TEXTURE, target_rect, PATH_TEXTURE_REGION_0)
+	_draw_path_border_overlays(tile, target_rect.position)
+
+
 func _draw_path_tiles() -> void:
 	for tile_data in GameState.tiles:
 		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_PATH:
 			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
 			if is_inside_map(tile):
-				_draw_path_tile(tile, int(tile_data.get("path_variant", 0)))
+				var path_meta: int = _get_path_meta(tile_data)
+				_draw_path_tile(tile, floori(float(maxi(0, path_meta)) / 4.0))
 
 
 func _draw_path_tile(tile: Vector2i, path_variant: int) -> void:
@@ -286,31 +365,88 @@ func _draw_path_tile(tile: Vector2i, path_variant: int) -> void:
 
 
 func _get_path_texture_region(path_variant: int) -> Rect2:
-	# TODO: Real path variations should come from c[][] / 4, as in the original JAR.
 	if abs(path_variant) % 2 == 1:
 		return PATH_TEXTURE_REGION_1
 	return PATH_TEXTURE_REGION_0
 
 
+func _get_path_meta(tile_data: Dictionary) -> int:
+	if tile_data.has("path_meta"):
+		return int(tile_data.get("path_meta", 0))
+	var path_variant: int = int(tile_data.get("path_variant", 0))
+	var path_mask: int = int(tile_data.get("path_mask", 0))
+	return maxi(0, path_variant) * 4 + clampi(path_mask, 0, 3)
+
+
 func _draw_path_border_overlays(tile: Vector2i, base_position: Vector2) -> void:
-	if not _is_path_visually_connected(Vector2i(tile.x, tile.y + 1)):
+	if not _is_path_visually_connected(tile, Vector2i(tile.x, tile.y + 1)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(18.0, -1.0))
-	if not _is_path_visually_connected(Vector2i(tile.x - 1, tile.y)):
+	if not _is_path_visually_connected(tile, Vector2i(tile.x - 1, tile.y)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(-1.0, -2.0))
-	if not _is_path_visually_connected(Vector2i(tile.x, tile.y - 1)):
+	if not _is_path_visually_connected(tile, Vector2i(tile.x, tile.y - 1)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_A, Vector2(-1.0, 7.0))
-	if not _is_path_visually_connected(Vector2i(tile.x + 1, tile.y)):
+	if not _is_path_visually_connected(tile, Vector2i(tile.x + 1, tile.y)):
 		_draw_path_overlay(base_position, PATH_BORDER_REGION_B, Vector2(17.0, 7.0))
 
 
-func _is_path_visually_connected(tile: Vector2i) -> bool:
-	return GameState.get_tile_type(tile) == GameState.TILE_TYPE_PATH or GameState.is_entrance_tile(tile)
+func _is_path_visually_connected(source_tile: Vector2i, neighbor_tile: Vector2i) -> bool:
+	if GameState.get_tile_type(neighbor_tile) == GameState.TILE_TYPE_PATH:
+		return true
+	if GameState.is_entrance_tile(neighbor_tile):
+		return true
+	if GameState.is_entrance_tile(source_tile) and _is_external_entry_road_tile(neighbor_tile):
+		return true
+	return false
+
+
+func _is_external_entry_road_tile(tile: Vector2i) -> bool:
+	var entry_tile: Vector2i = GameState.ENTRY_TILE
+	return tile.x == entry_tile.x and tile.y < entry_tile.y and tile.y >= -EXTERNAL_ENTRY_ROAD_LENGTH
 
 
 func _draw_path_overlay(base_position: Vector2, source_region: Rect2, offset: Vector2) -> void:
 	draw_texture_rect_region(
 		PATH_TEXTURE,
 		Rect2(base_position + offset, source_region.size),
+		source_region
+	)
+
+
+func _draw_water_tiles() -> void:
+	for tile_data in GameState.tiles:
+		if String(tile_data.get("type", "")) == GameState.TILE_TYPE_WATER:
+			var tile := Vector2i(int(tile_data.get("x", -1)), int(tile_data.get("y", -1)))
+			if is_inside_map(tile):
+				_draw_water_tile(tile)
+
+
+func _draw_water_tile(tile: Vector2i) -> void:
+	var top := tile_to_screen(tile)
+	var base_position: Vector2 = top + Vector2(tile_width * -0.5, 0.0)
+	var source_region: Rect2 = WATER_TEXTURE_REGIONS[_water_frame]
+	draw_texture_rect_region(
+		WATER_TEXTURE,
+		Rect2((base_position + Vector2(0.0, -1.0)).round(), source_region.size),
+		source_region
+	)
+	if not _is_water_neighbor(Vector2i(tile.x, tile.y + 1)):
+		_draw_water_overlay(base_position, WATER_EDGE_REGION_A, Vector2(18.0, -7.0))
+	if not _is_water_neighbor(Vector2i(tile.x - 1, tile.y)):
+		_draw_water_overlay(base_position, WATER_EDGE_REGION_B, Vector2(-2.0, -7.0))
+	if not _is_water_neighbor(Vector2i(tile.x, tile.y - 1)):
+		_draw_water_overlay(base_position, WATER_EDGE_REGION_A, Vector2(-3.0, 3.0))
+	if not _is_water_neighbor(Vector2i(tile.x + 1, tile.y)):
+		_draw_water_overlay(base_position, WATER_EDGE_REGION_B, Vector2(17.0, 3.0))
+
+
+func _is_water_neighbor(tile: Vector2i) -> bool:
+	return GameState.get_tile_type(tile) == GameState.TILE_TYPE_WATER
+
+
+func _draw_water_overlay(base_position: Vector2, source_region: Rect2, offset: Vector2) -> void:
+	draw_texture_rect_region(
+		PATH_TEXTURE,
+		Rect2((base_position + offset).round(), source_region.size),
 		source_region
 	)
 
@@ -374,6 +510,9 @@ func _draw_build_preview() -> void:
 	var can_build: bool = _can_build_preview(size)
 	var fill_color: Color = Color(0.3, 0.95, 0.35, 0.38)
 	var outline_color: Color = Color(0.15, 0.85, 0.25, 1.0)
+	if GameState.selected_catalog_id == "water" and can_build:
+		fill_color = Color(0.2, 0.55, 1.0, 0.38)
+		outline_color = Color(0.1, 0.38, 0.95, 1.0)
 	if GameState.selected_catalog_id == "basic_attraction" and can_build:
 		fill_color = Color(1.0, 0.86, 0.18, 0.38)
 		outline_color = Color(0.95, 0.7, 0.08, 1.0)

@@ -2,8 +2,21 @@ extends Node2D
 
 # Coordinates the park scene. Detailed build and visitor behavior will be added later.
 
-const BASIC_PATH_COST: int = 10
-const BASIC_ATTRACTION_COST: int = 250
+const BASIC_PATH_COST: int = 3
+const BASIC_PATH_REFUND: int = 1
+const STONE_PATH_ID: String = "stone_path"
+const STONE_PATH_NAME: String = "Caminho de pedra"
+const STONE_PATH_COST: int = 6
+const STONE_PATH_REFUND: int = 3
+const WATER_ID: String = "water"
+const WATER_NAME: String = "Água"
+const WATER_COST: int = 10
+const BASIC_ATTRACTION_NAME: String = "Balanço"
+const BASIC_ATTRACTION_COST: int = 30
+const BASIC_ATTRACTION_REFUND: int = 15
+const BASIC_ATTRACTION_TICKET_PRICE: int = 1
+const BASIC_ATTRACTION_SATISFACTION: int = 5
+const BASIC_ATTRACTION_SIZE: Vector2i = Vector2i(3, 3)
 
 @onready var iso_map: Node = $IsoMap
 @onready var visitor_system: Node = $VisitorSystem
@@ -12,6 +25,8 @@ const BASIC_ATTRACTION_COST: int = 250
 @onready var build_menu: Control = $UI/BuildMenu
 @onready var building_info_panel: Control = $UI/BuildingInfoPanel
 @onready var basic_path_button: Button = $UI/BuildMenu/Items/BasicPathButton
+@onready var stone_path_button: Button = $UI/BuildMenu/Items/StonePathButton
+@onready var water_button: Button = $UI/BuildMenu/Items/WaterButton
 @onready var basic_attraction_button: Button = $UI/BuildMenu/Items/BasicAttractionButton
 @onready var cancel_build_button: Button = $UI/BuildMenu/Items/CancelButton
 @onready var building_title_label: Label = $UI/BuildingInfoPanel/Content/Title
@@ -42,6 +57,8 @@ func _ready() -> void:
 	if hud.has_signal("load_requested"):
 		hud.load_requested.connect(_on_load_requested)
 	basic_path_button.pressed.connect(_on_basic_path_pressed)
+	stone_path_button.pressed.connect(_on_stone_path_pressed)
+	water_button.pressed.connect(_on_water_pressed)
 	basic_attraction_button.pressed.connect(_on_basic_attraction_pressed)
 	cancel_build_button.pressed.connect(_on_build_cancel_pressed)
 	building_close_button.pressed.connect(_on_building_info_close_pressed)
@@ -65,8 +82,12 @@ func select_building(building_id: String) -> void:
 	GameState.selected_catalog_id = building_id
 	if building_id == "basic_path":
 		_show_build_mode("Build: Path")
+	elif building_id == STONE_PATH_ID:
+		_show_build_mode("Build: %s" % STONE_PATH_NAME)
+	elif building_id == WATER_ID:
+		_show_build_mode("Build: %s" % WATER_NAME)
 	elif building_id == "basic_attraction":
-		_show_build_mode("Build: Attraction")
+		_show_build_mode("Build: %s" % BASIC_ATTRACTION_NAME)
 	if iso_map.has_method("refresh_tiles"):
 		iso_map.refresh_tiles()
 
@@ -98,6 +119,10 @@ func _on_tile_touched(tile: Vector2i) -> void:
 		hud.show_selected_tile(tile)
 	if GameState.current_mode == "build" and GameState.selected_catalog_id == "basic_path":
 		_try_build_basic_path(tile)
+	elif GameState.current_mode == "build" and GameState.selected_catalog_id == STONE_PATH_ID:
+		_try_build_stone_path(tile)
+	elif GameState.current_mode == "build" and GameState.selected_catalog_id == WATER_ID:
+		_try_build_water(tile)
 	elif GameState.current_mode == "build" and GameState.selected_catalog_id == "basic_attraction":
 		_try_build_basic_attraction(tile)
 	_show_selected_object(tile)
@@ -132,17 +157,22 @@ func _show_selected_object(tile: Vector2i) -> void:
 func _show_building_info(tile: Vector2i) -> void:
 	var tile_type: String = GameState.get_tile_type(tile)
 	if tile_type == GameState.TILE_TYPE_PATH:
-		building_title_label.text = "Path"
-		building_details_label.text = "Type: Path\nOriginal cost: %d" % BASIC_PATH_COST
+		building_title_label.text = _get_path_name_at(tile)
+		building_details_label.text = "Type: Path\nOriginal cost: %d" % _get_path_cost_at(tile)
+		building_sell_button.visible = true
+		building_info_panel.visible = true
+	elif tile_type == GameState.TILE_TYPE_WATER:
+		building_title_label.text = WATER_NAME
+		building_details_label.text = "Type: Water\nOriginal cost: %d" % WATER_COST
 		building_sell_button.visible = true
 		building_info_panel.visible = true
 	elif tile_type == GameState.TILE_TYPE_ATTRACTION:
-		building_title_label.text = "Attraction"
+		building_title_label.text = BASIC_ATTRACTION_NAME
 		var attraction_origin: Vector2i = GameState.get_basic_attraction_origin_at(tile)
 		var visitors_served: int = 0
 		if visitor_system.has_method("get_visitors_served_for_attraction"):
 			visitors_served = visitor_system.get_visitors_served_for_attraction(attraction_origin)
-		building_details_label.text = "Type: Attraction\nCost: %d\nProfit per visitor: 25\nVisitors served: %d" % [BASIC_ATTRACTION_COST, visitors_served]
+		building_details_label.text = "Type: Attraction\nCost: %d\nTicket price: %d\nSatisfaction: %d\nVisitors served: %d" % [BASIC_ATTRACTION_COST, BASIC_ATTRACTION_TICKET_PRICE, BASIC_ATTRACTION_SATISFACTION, visitors_served]
 		building_sell_button.visible = true
 		building_info_panel.visible = true
 	else:
@@ -156,6 +186,16 @@ func _hide_building_info() -> void:
 
 func _on_basic_path_pressed() -> void:
 	select_building("basic_path")
+	close_build_menu()
+
+
+func _on_stone_path_pressed() -> void:
+	select_building(STONE_PATH_ID)
+	close_build_menu()
+
+
+func _on_water_pressed() -> void:
+	select_building(WATER_ID)
 	close_build_menu()
 
 
@@ -179,11 +219,15 @@ func _on_building_sell_pressed() -> void:
 	var refund: int = 0
 	var sold: bool = false
 	if tile_type == GameState.TILE_TYPE_PATH:
+		var path_refund: int = _get_path_refund_at(tile)
 		sold = GameState.remove_path_tile(tile)
-		refund = 5
+		if sold and GameState.get_tile_type(tile) != GameState.TILE_TYPE_PATH:
+			refund = path_refund
+	elif tile_type == GameState.TILE_TYPE_WATER:
+		sold = GameState.remove_water_tile(tile)
 	elif tile_type == GameState.TILE_TYPE_ATTRACTION:
 		sold = GameState.remove_basic_attraction_at(tile)
-		refund = 125
+		refund = BASIC_ATTRACTION_REFUND
 	if not sold:
 		return
 	Economy.money += refund
@@ -253,6 +297,14 @@ func _on_load_requested() -> void:
 
 
 func _try_build_basic_path(tile: Vector2i) -> void:
+	_try_build_path(tile, BASIC_PATH_COST, GameState.PATH_GRAVEL_VARIANT, GameState.PATH_GRAVEL_MASK, "Basic Path")
+
+
+func _try_build_stone_path(tile: Vector2i) -> void:
+	_try_build_path(tile, STONE_PATH_COST, GameState.PATH_STONE_VARIANT, GameState.PATH_STONE_MASK, STONE_PATH_NAME)
+
+
+func _try_build_water(tile: Vector2i) -> void:
 	if not _is_area_inside_map(tile, Vector2i(1, 1)):
 		_show_error_message("Outside map")
 		return
@@ -263,12 +315,35 @@ func _try_build_basic_path(tile: Vector2i) -> void:
 		_show_error_message("Tile occupied")
 		print("Tile already used: ", tile)
 		return
-	if not Economy.can_afford(BASIC_PATH_COST):
+	if not Economy.can_afford(WATER_COST):
 		_show_error_message("Not enough money")
-		print("Not enough money for Basic Path")
+		print("Not enough money for ", WATER_NAME)
 		return
-	if GameState.add_path_tile(tile):
-		Economy.spend(BASIC_PATH_COST)
+	if GameState.add_water_tile(tile):
+		Economy.spend(WATER_COST)
+		if iso_map.has_method("refresh_tiles"):
+			iso_map.refresh_tiles()
+		if hud.has_method("update_money"):
+			hud.update_money()
+
+
+func _try_build_path(tile: Vector2i, cost: int, path_variant: int, path_mask: int, path_name: String) -> void:
+	if not _is_area_inside_map(tile, Vector2i(1, 1)):
+		_show_error_message("Outside map")
+		return
+	if GameState.is_entrance_tile(tile):
+		_show_error_message("Entrance blocked")
+		return
+	if GameState.is_tile_used(tile):
+		_show_error_message("Tile occupied")
+		print("Tile already used: ", tile)
+		return
+	if not Economy.can_afford(cost):
+		_show_error_message("Not enough money")
+		print("Not enough money for ", path_name)
+		return
+	if GameState.add_path_tile(tile, path_variant, path_mask):
+		Economy.spend(cost)
 		if iso_map.has_method("refresh_tiles"):
 			iso_map.refresh_tiles()
 		if hud.has_method("update_money"):
@@ -277,22 +352,22 @@ func _try_build_basic_path(tile: Vector2i) -> void:
 
 
 func _try_build_basic_attraction(tile: Vector2i) -> void:
-	var size: Vector2i = Vector2i(2, 2)
+	var size: Vector2i = BASIC_ATTRACTION_SIZE
 	if not _is_area_inside_map(tile, size):
 		_show_error_message("Outside map")
-		print("Cannot place Basic Attraction at: ", tile)
+		print("Cannot place Balanço at: ", tile)
 		return
 	if _area_includes_entrance(tile, size):
 		_show_error_message("Entrance blocked")
-		print("Cannot place Basic Attraction at: ", tile)
+		print("Cannot place Balanço at: ", tile)
 		return
 	if _is_area_occupied(tile, size):
 		_show_error_message("Tile occupied")
-		print("Cannot place Basic Attraction at: ", tile)
+		print("Cannot place Balanço at: ", tile)
 		return
 	if not Economy.can_afford(BASIC_ATTRACTION_COST):
 		_show_error_message("Not enough money")
-		print("Not enough money for Basic Attraction")
+		print("Not enough money for Balanço")
 		return
 	if GameState.add_basic_attraction(tile):
 		Economy.spend(BASIC_ATTRACTION_COST)
@@ -320,6 +395,29 @@ func _is_area_occupied(origin: Vector2i, size: Vector2i) -> bool:
 			if GameState.is_tile_used(Vector2i(x, y)):
 				return true
 	return false
+
+
+func _get_path_name_at(tile: Vector2i) -> String:
+	return STONE_PATH_NAME if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else "Basic Path"
+
+
+func _get_path_cost_at(tile: Vector2i) -> int:
+	return STONE_PATH_COST if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else BASIC_PATH_COST
+
+
+func _get_path_refund_at(tile: Vector2i) -> int:
+	return STONE_PATH_REFUND if _get_path_variant_at(tile) == GameState.PATH_STONE_VARIANT else BASIC_PATH_REFUND
+
+
+func _get_path_variant_at(tile: Vector2i) -> int:
+	for tile_data in GameState.tiles:
+		if String(tile_data.get("type", "")) != GameState.TILE_TYPE_PATH:
+			continue
+		if int(tile_data.get("x", -1)) == tile.x and int(tile_data.get("y", -1)) == tile.y:
+			if tile_data.has("path_meta"):
+				return floori(float(maxi(0, int(tile_data.get("path_meta", 0)))) / 4.0)
+			return maxi(0, int(tile_data.get("path_variant", 0)))
+	return GameState.PATH_GRAVEL_VARIANT
 
 
 func _spawn_simple_visitor() -> void:
