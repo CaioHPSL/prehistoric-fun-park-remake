@@ -45,6 +45,8 @@ const HIGH_DRAW_LAYER_DECOR: int = 20
 const HIGH_DRAW_LAYER_ATTRACTION: int = 30
 const HIGH_DRAW_LAYER_VISITOR: int = 40
 const HIGH_DRAW_LAYER_ENTRANCE: int = 80
+const ATTRACTION_BASE_LAYER_OFFSET: int = HIGH_DRAW_LAYER_ATTRACTION - 200
+const ATTRACTION_HIGH_CHUNK38_LAYER_OFFSET: int = HIGH_DRAW_LAYER_ATTRACTION + 800
 const ATTRACTION_ANIMATION_SECONDS: float = 0.12
 const TERRAIN_TEXTURE: Texture2D = preload("res://assets/original_sprites/terrain/gpack2_000.png")
 const NATURAL_DECOR_TEXTURE: Texture2D = preload("res://assets/original_sprites/decor/gpack1_003.png")
@@ -76,13 +78,35 @@ const NATURAL_DECOR_PIECES: Array = [
 @export var fixed_world_static_cache_margin: int = VISIBLE_TILE_MARGIN
 @export var static_render_cache_margin: int = 4
 @export var use_simple_attraction_render: bool = true
-@export var use_cached_attraction_chunk_render: bool = false
-@export var include_attraction_animated_chunks: bool = false
+@export var use_cached_attraction_chunk_render: bool = true
+@export var include_attraction_frame_static_chunks: bool = true
+@export var include_attraction_animated_chunks: bool = true
+@export var include_attraction_line_chunks: bool = true
+@export var include_attraction_special_chunks: bool = true
+@export var include_attraction_passenger_chunks: bool = true
 @export var use_iso_visitor_depth_render: bool = false
 @export var debug_disable_attraction_render: bool = false
 @export var debug_disable_high_draw_jobs: bool = false
 @export var debug_disable_visitor_render_jobs: bool = false
 @export var debug_log_render_counters: bool = false
+@export var debug_attraction_visual_mode: String = "all"
+@export var debug_attraction_only_jar_type: int = -1
+@export var debug_draw_chunk38: bool = true
+@export var debug_draw_static_chunks: bool = true
+@export var debug_draw_animated_chunks: bool = true
+@export var debug_draw_line_chunks: bool = true
+@export var debug_draw_static_lines: bool = true
+@export var debug_draw_animated_lines: bool = true
+@export var debug_show_line_points: bool = false
+@export var debug_draw_special_chunks: bool = true
+@export var debug_show_special_anchors: bool = false
+@export var debug_draw_passenger_chunks: bool = true
+@export var debug_show_passenger_anchors: bool = false
+@export var debug_draw_chunk_labels: bool = false
+@export var debug_draw_chunk_anchors: bool = false
+@export var debug_show_animation_frame: bool = false
+@export var debug_freeze_attraction_animation: bool = false
+@export var debug_forced_attraction_frame: int = -1
 
 var selected_tile: Vector2i = Vector2i(-1, -1)
 var preview_tile: Vector2i = Vector2i(-1, -1)
@@ -102,8 +126,20 @@ var _attraction_texture_cache: Dictionary = {}
 var _attraction_def_cache: Dictionary = {}
 var _attraction_def_cache_prepared: bool = false
 var _attraction_instance_jobs_cache: Dictionary = {}
+var _attraction_instance_frame_static_jobs_cache: Dictionary = {}
+var _attraction_instance_animated_jobs_cache: Dictionary = {}
+var _attraction_instance_animated_line_jobs_cache: Dictionary = {}
+var _attraction_instance_special_jobs_cache: Dictionary = {}
 var _last_attraction_def_count: int = 0
 var _last_attraction_instance_job_count: int = 0
+var _last_frame_static_attraction_job_count: int = 0
+var _last_animated_attraction_job_count: int = 0
+var _last_attraction_line_job_count: int = 0
+var _last_special_attraction_job_count: int = 0
+var _last_passenger_attraction_job_count: int = 0
+var _attraction_runtime_frames: Dictionary = {}
+var _attraction_runtime_states: Dictionary = {}
+var _last_animated_attraction_instances_advanced: int = 0
 var _render_draw_count: int = 0
 var _render_redraw_request_count: int = 0
 var _render_log_timer: float = 0.0
@@ -180,13 +216,13 @@ func _process(delta: float) -> void:
 		if _has_visible_water_tiles(_get_visible_tile_bounds()):
 			_water_frame = (_water_frame + 1) % WATER_TEXTURE_REGIONS.size()
 			_request_water_redraw()
-	if not use_simple_attraction_render:
+	if include_attraction_frame_static_chunks or include_attraction_animated_chunks or include_attraction_line_chunks or include_attraction_special_chunks or include_attraction_passenger_chunks:
 		_attraction_frame_timer += delta
 		if _attraction_frame_timer >= ATTRACTION_ANIMATION_SECONDS:
 			_attraction_frame_timer = 0.0
-			if not GameState.buildings.is_empty():
+			if _advance_visible_attraction_animation_frames(_get_visible_tile_bounds()):
 				_attraction_frame = (_attraction_frame + 1) % 1024
-				_request_static_high_redraw("attraction animation frame")
+				_request_dynamic_redraw()
 	if _should_redraw_for_visitors():
 		_request_dynamic_redraw()
 	if debug_log_render_counters and _render_log_timer >= 1.0:
@@ -444,6 +480,7 @@ func _draw_water_layer(canvas: CanvasItem, visible_bounds: Rect2i) -> void:
 func _draw_static_path_layer(canvas: CanvasItem, visible_bounds: Rect2i) -> void:
 	_draw_path_tiles(canvas, visible_bounds)
 	_draw_external_border(canvas, visible_bounds)
+	_draw_attraction_base_jobs(canvas, visible_bounds)
 
 
 func _draw_static_high_layer(canvas: CanvasItem, visible_bounds: Rect2i) -> void:
@@ -459,6 +496,49 @@ func _draw_overlay_layer(canvas: CanvasItem) -> void:
 		_draw_selected_tile(canvas)
 	if _is_build_preview_active() and is_inside_map(preview_tile):
 		_draw_build_preview(canvas)
+
+
+func _draw_attraction_base_jobs(canvas: CanvasItem, visible_bounds: Rect2i) -> void:
+	if debug_disable_attraction_render or not use_cached_attraction_chunk_render:
+		return
+	_prepare_attraction_def_cache()
+	var jobs: Array = []
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var attraction_def: Dictionary = _get_attraction_def(String(building_data.get("id", "basic_attraction")), int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty():
+			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if not _building_intersects_bounds(origin, size, visible_bounds):
+			continue
+		var orientation: int = int(building_data.get("orientation", 0))
+		if _debug_allows_attraction_part("footprint"):
+			_append_cached_attraction_tile_group_phase_jobs(
+				jobs,
+				origin,
+				attraction_def.get("footprint_base_tile_groups", []) as Array,
+				orientation,
+				"base",
+				ATTRACTION_BASE_LAYER_OFFSET
+			)
+		if debug_draw_chunk38 and _debug_allows_attraction_part("chunk38"):
+			_append_cached_attraction_tile_group_phase_jobs(
+				jobs,
+				origin,
+				attraction_def.get("chunk38_tile_groups", []) as Array,
+				orientation,
+				"base",
+				ATTRACTION_BASE_LAYER_OFFSET + 20
+			)
+	if jobs.size() > 1:
+		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
+	for job_entry in jobs:
+		_draw_high_job(canvas, job_entry as Dictionary)
 
 
 func _get_visible_tile_bounds() -> Rect2i:
@@ -525,11 +605,33 @@ func _check_render_mode_changed() -> void:
 
 
 func _make_render_mode_key() -> String:
-	return "simple=%s|chunk=%s|animated=%s|debug_attraction=%s|iso_visitors=%s|entrance_high=%s|fixed_static=%s|fixed_margin=%d|camera_margin=%d" % [
+	return "simple=%s|chunk=%s|frame_static=%s|animated=%s|lines=%s|special=%s|passengers=%s|debug_attraction=%s|debug_mode=%s|debug_jar=%d|draw38=%s|draw_static=%s|draw_anim=%s|draw_lines=%s|draw_static_lines=%s|draw_animated_lines=%s|show_line_points=%s|draw_special=%s|show_special_anchors=%s|draw_passengers=%s|show_passenger_anchors=%s|chunk_labels=%s|chunk_anchors=%s|show_frame=%s|freeze_frame=%s|forced_frame=%d|iso_visitors=%s|entrance_high=%s|fixed_static=%s|fixed_margin=%d|camera_margin=%d" % [
 		str(use_simple_attraction_render),
 		str(use_cached_attraction_chunk_render),
+		str(include_attraction_frame_static_chunks),
 		str(include_attraction_animated_chunks),
+		str(include_attraction_line_chunks),
+		str(include_attraction_special_chunks),
+		str(include_attraction_passenger_chunks),
 		str(debug_disable_attraction_render),
+		debug_attraction_visual_mode,
+		debug_attraction_only_jar_type,
+		str(debug_draw_chunk38),
+		str(debug_draw_static_chunks),
+		str(debug_draw_animated_chunks),
+		str(debug_draw_line_chunks),
+		str(debug_draw_static_lines),
+		str(debug_draw_animated_lines),
+		str(debug_show_line_points),
+		str(debug_draw_special_chunks),
+		str(debug_show_special_anchors),
+		str(debug_draw_passenger_chunks),
+		str(debug_show_passenger_anchors),
+		str(debug_draw_chunk_labels),
+		str(debug_draw_chunk_anchors),
+		str(debug_show_animation_frame),
+		str(debug_freeze_attraction_animation),
+		debug_forced_attraction_frame,
 		str(use_iso_visitor_depth_render and not debug_disable_visitor_render_jobs),
 		str(_draw_entrance_high_in_isomap),
 		str(use_fixed_world_static_cache),
@@ -570,10 +672,84 @@ func _has_visible_water_tiles(visible_bounds: Rect2i) -> bool:
 	return false
 
 
+func _has_visible_animated_attractions(visible_bounds: Rect2i) -> bool:
+	if not use_cached_attraction_chunk_render or debug_disable_attraction_render:
+		return false
+	_prepare_attraction_def_cache()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var attraction_def: Dictionary = _get_attraction_def(String(building_data.get("id", "basic_attraction")), int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty():
+			continue
+		var has_frame_static_pieces: bool = include_attraction_frame_static_chunks and not (attraction_def.get("frame_static_tile_groups", []) as Array).is_empty()
+		var has_animated_pieces: bool = include_attraction_animated_chunks and debug_draw_animated_chunks and not (attraction_def.get("animated_pieces", []) as Array).is_empty()
+		var has_animated_lines: bool = include_attraction_line_chunks and debug_draw_line_chunks and debug_draw_animated_lines and not (attraction_def.get("animated_lines", []) as Array).is_empty()
+		var has_special_pieces: bool = include_attraction_special_chunks and debug_draw_special_chunks and not (attraction_def.get("special_pieces", []) as Array).is_empty()
+		var has_passenger_pieces: bool = include_attraction_passenger_chunks and debug_draw_passenger_chunks and bool((attraction_def.get("passenger_data", {}) as Dictionary).get("render_enabled", false))
+		if not has_frame_static_pieces and not has_animated_pieces and not has_animated_lines and not has_special_pieces and not has_passenger_pieces:
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if _building_intersects_bounds(origin, size, visible_bounds):
+			return true
+	return false
+
+
+func _advance_visible_attraction_animation_frames(visible_bounds: Rect2i) -> bool:
+	_last_animated_attraction_instances_advanced = 0
+	if debug_freeze_attraction_animation:
+		return false
+	_prepare_attraction_def_cache()
+	var should_redraw_dynamic_layer: bool = false
+	var active_counts: Dictionary = _get_attraction_active_counts_snapshot()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var attraction_def: Dictionary = _get_attraction_def(String(building_data.get("id", "basic_attraction")), int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty():
+			continue
+		if not _attraction_def_has_dynamic_chunk_jobs(attraction_def):
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		var is_visible: bool = _building_intersects_bounds(origin, size, visible_bounds)
+		var instance_key: String = _make_attraction_instance_cache_key(building_data, attraction_def)
+		var active_count: int = int(active_counts.get(_attraction_origin_key(origin), 0))
+		var current_frame: int = int(_attraction_runtime_frames.get(instance_key, int(building_data.get("animation_frame", 0))))
+		if active_count <= 0:
+			_attraction_runtime_states[instance_key] = 0
+			if current_frame != 0:
+				_attraction_runtime_frames[instance_key] = 0
+				if is_visible:
+					should_redraw_dynamic_layer = true
+			continue
+		var frame_limit: int = maxi(1, int(attraction_def.get("animation_frame_limit", attraction_def.get("animation_frame_count", 1))))
+		_attraction_runtime_states[instance_key] = 3
+		_attraction_runtime_frames[instance_key] = posmod(current_frame + 1, frame_limit)
+		_last_animated_attraction_instances_advanced += 1
+		if is_visible:
+			should_redraw_dynamic_layer = true
+	return should_redraw_dynamic_layer
+
+
+func _get_attraction_active_counts_snapshot() -> Dictionary:
+	if _visitor_system != null and _visitor_system.has_method("get_attraction_active_counts_snapshot"):
+		return _visitor_system.call("get_attraction_active_counts_snapshot") as Dictionary
+	return {}
+
+
 func _draw_high_jobs(canvas: CanvasItem, visible_bounds: Rect2i) -> void:
 	if debug_disable_high_draw_jobs:
 		_last_high_job_count = 0
 		_last_attraction_job_count = 0
+		_last_frame_static_attraction_job_count = 0
+		_last_animated_attraction_job_count = 0
+		_last_attraction_line_job_count = 0
+		_last_special_attraction_job_count = 0
+		_last_passenger_attraction_job_count = 0
 		_last_visitor_job_count = 0
 		_last_decor_job_count = 0
 		_last_static_job_count = 0
@@ -593,10 +769,15 @@ func _draw_dynamic_visitor_jobs(canvas: CanvasItem, visible_bounds: Rect2i) -> v
 	var start_usec: int = Time.get_ticks_usec()
 	var dynamic_start_usec: int = Time.get_ticks_usec()
 	var dynamic_jobs: Array = []
+	_append_frame_static_attraction_jobs(dynamic_jobs, visible_bounds)
+	_append_animated_attraction_jobs(dynamic_jobs, visible_bounds)
+	_append_animated_attraction_line_jobs(dynamic_jobs, visible_bounds)
+	_append_special_attraction_jobs(dynamic_jobs, visible_bounds)
+	_append_attraction_passenger_jobs(dynamic_jobs, visible_bounds)
 	_append_visitor_jobs(dynamic_jobs, visible_bounds)
 	_last_dynamic_jobs_usec = Time.get_ticks_usec() - dynamic_start_usec
-	_last_visitor_job_count = dynamic_jobs.size()
 	_last_dynamic_job_count = dynamic_jobs.size()
+	_last_visitor_job_count = dynamic_jobs.size() - _last_frame_static_attraction_job_count - _last_animated_attraction_job_count - _last_attraction_line_job_count - _last_special_attraction_job_count - _last_passenger_attraction_job_count
 	if dynamic_jobs.size() > 1:
 		dynamic_jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
 	for job_entry in dynamic_jobs:
@@ -638,7 +819,7 @@ func _rebuild_static_high_jobs_cache(visible_bounds: Rect2i, cache_key: String, 
 
 
 func _make_static_high_jobs_cache_key(visible_bounds: Rect2i) -> String:
-	return "%d,%d,%d,%d|%d,%d|simple=%s|chunk=%s|animated=%s|attractions=%s|entrance_high=%s" % [
+	return "%d,%d,%d,%d|%d,%d|simple=%s|chunk=%s|frame_static=%s|animated=%s|lines=%s|special=%s|passengers=%s|attractions=%s|debug_mode=%s|debug_jar=%d|draw38=%s|draw_static=%s|draw_anim=%s|draw_lines=%s|draw_static_lines=%s|draw_animated_lines=%s|show_line_points=%s|draw_special=%s|show_special_anchors=%s|draw_passengers=%s|show_passenger_anchors=%s|chunk_labels=%s|chunk_anchors=%s|entrance_high=%s" % [
 		visible_bounds.position.x,
 		visible_bounds.position.y,
 		visible_bounds.size.x,
@@ -647,12 +828,29 @@ func _make_static_high_jobs_cache_key(visible_bounds: Rect2i) -> String:
 		map_height,
 		str(use_simple_attraction_render),
 		str(use_cached_attraction_chunk_render),
+		str(include_attraction_frame_static_chunks),
 		str(include_attraction_animated_chunks),
+		str(include_attraction_line_chunks),
+		str(include_attraction_special_chunks),
+		str(include_attraction_passenger_chunks),
 		str(not debug_disable_attraction_render),
+		debug_attraction_visual_mode,
+		debug_attraction_only_jar_type,
+		str(debug_draw_chunk38),
+		str(debug_draw_static_chunks),
+		str(debug_draw_animated_chunks),
+		str(debug_draw_line_chunks),
+		str(debug_draw_static_lines),
+		str(debug_draw_animated_lines),
+		str(debug_show_line_points),
+		str(debug_draw_special_chunks),
+		str(debug_show_special_anchors),
+		str(debug_draw_passenger_chunks),
+		str(debug_show_passenger_anchors),
+		str(debug_draw_chunk_labels),
+		str(debug_draw_chunk_anchors),
 		str(_draw_entrance_high_in_isomap),
 	]
-
-
 func _get_static_render_bounds(visible_bounds: Rect2i) -> Rect2i:
 	if use_fixed_world_static_cache:
 		_ensure_fixed_world_static_render_bounds("draw fixed world bounds initialized")
@@ -713,6 +911,10 @@ func _invalidate_static_high_jobs_cache(reason: String) -> void:
 	_static_high_jobs_cache_dirty = true
 	_static_high_jobs_cache_reason = reason
 	_attraction_instance_jobs_cache.clear()
+	_attraction_instance_frame_static_jobs_cache.clear()
+	_attraction_instance_animated_jobs_cache.clear()
+	_attraction_instance_animated_line_jobs_cache.clear()
+	_attraction_instance_special_jobs_cache.clear()
 
 
 func _draw_merged_high_jobs(canvas: CanvasItem, static_jobs: Array, dynamic_jobs: Array) -> void:
@@ -748,6 +950,34 @@ func _draw_high_job(canvas: CanvasItem, job: Dictionary) -> void:
 	if draw_type == "attraction_placeholder":
 		canvas.draw_colored_polygon(job.get("points", PackedVector2Array()) as PackedVector2Array, job.get("fill_color", Color.WHITE) as Color)
 		canvas.draw_polyline(job.get("outline", PackedVector2Array()) as PackedVector2Array, job.get("outline_color", Color.WHITE) as Color, float(job.get("outline_width", 1.0)))
+		return
+	if draw_type == "attraction_line":
+		canvas.draw_line(
+			job.get("start", Vector2.ZERO) as Vector2,
+			job.get("end", Vector2.ZERO) as Vector2,
+			job.get("color", Color.BLACK) as Color,
+			float(job.get("width", 1.0))
+		)
+		return
+	if draw_type == "debug_anchor":
+		var center: Vector2 = job.get("position", Vector2.ZERO) as Vector2
+		var color: Color = job.get("color", Color.YELLOW) as Color
+		canvas.draw_circle(center, float(job.get("radius", 2.0)), color)
+		canvas.draw_line(center + Vector2(-4.0, 0.0), center + Vector2(4.0, 0.0), color, 1.0)
+		canvas.draw_line(center + Vector2(0.0, -4.0), center + Vector2(0.0, 4.0), color, 1.0)
+		return
+	if draw_type == "debug_label":
+		var font: Font = ThemeDB.fallback_font
+		if font != null:
+			canvas.draw_string(
+				font,
+				job.get("position", Vector2.ZERO) as Vector2,
+				String(job.get("text", "")),
+				HORIZONTAL_ALIGNMENT_LEFT,
+				-1.0,
+				8,
+				job.get("color", Color.WHITE) as Color
+			)
 		return
 	var texture: Texture2D = job.get("texture", null) as Texture2D
 	if texture == null:
@@ -859,11 +1089,14 @@ func _append_cached_attraction_chunk_jobs(jobs: Array, visible_bounds: Rect2i) -
 		if attraction_def.is_empty():
 			_append_simple_attraction_building_jobs(jobs, building_data, visible_bounds)
 			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
 		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
 		if not _building_intersects_bounds(origin, size, visible_bounds):
 			continue
 		var instance_jobs: Array = _get_attraction_instance_static_jobs(building_data, attraction_def)
-		if instance_jobs.is_empty():
+		var has_cached_base_jobs: bool = not (attraction_def.get("footprint_base_tile_groups", []) as Array).is_empty() or not (attraction_def.get("chunk38_tile_groups", []) as Array).is_empty()
+		if instance_jobs.is_empty() and not _attraction_def_has_dynamic_chunk_jobs(attraction_def) and not has_cached_base_jobs:
 			_append_simple_attraction_building_jobs(jobs, building_data, visible_bounds)
 			continue
 		for job_entry in instance_jobs:
@@ -895,18 +1128,125 @@ func _prepare_attraction_def_cache() -> void:
 
 func _build_attraction_def(catalog_id: String, catalog_data: Dictionary) -> Dictionary:
 	var size_values: Array = catalog_data.get("size", [1, 1]) as Array
-	var static_pieces: Array = _build_attraction_piece_defs(catalog_data.get("visual_static_pieces", []) as Array, false)
-	var animated_pieces: Array = _build_attraction_piece_defs(catalog_data.get("visual_animated_pieces", []) as Array, true)
-	if static_pieces.is_empty() and animated_pieces.is_empty():
+	var size: Vector2i = Vector2i(int(size_values[0]), int(size_values[1]))
+	var jar_type: int = int(catalog_data.get("jar_type", -1))
+	var visual_data: Dictionary = catalog_data
+	if Catalog.has_method("get_attraction_visual"):
+		var loaded_visual_data: Variant = Catalog.call("get_attraction_visual", catalog_id, jar_type)
+		if loaded_visual_data is Dictionary and not (loaded_visual_data as Dictionary).is_empty():
+			visual_data = loaded_visual_data as Dictionary
+	var static_pieces: Array = _build_attraction_piece_defs(visual_data.get("visual_static_pieces", []) as Array, false)
+	var animated_piece_entries: Array = visual_data.get("visual_animated_pieces", catalog_data.get("visual_animated_pieces", [])) as Array
+	var static_line_entries: Array = visual_data.get("visual_static_lines", catalog_data.get("visual_static_lines", [])) as Array
+	var animated_line_entries: Array = visual_data.get("visual_animated_lines", catalog_data.get("visual_animated_lines", [])) as Array
+	var special_piece_entries: Array = visual_data.get("visual_special_pieces", catalog_data.get("visual_special_pieces", [])) as Array
+	var passenger_data: Dictionary = visual_data.get("visual_passenger_chunks", catalog_data.get("visual_passenger_chunks", {})) as Dictionary
+	var animated_pieces: Array = _build_attraction_piece_defs(animated_piece_entries, true)
+	var static_lines: Array = _build_attraction_line_defs(static_line_entries, false)
+	var animated_lines: Array = _build_attraction_line_defs(animated_line_entries, true)
+	var special_pieces: Array = _build_attraction_special_piece_defs(special_piece_entries)
+	var static_tile_groups: Array = _build_attraction_static_tile_groups(visual_data.get("visual_static_tiles", []) as Array, static_pieces)
+	var frame_static_tile_groups: Array = _build_attraction_static_tile_groups(visual_data.get("visual_frame_static_tiles", []) as Array, static_pieces)
+	var ak_pieces: Array = _build_attraction_piece_defs(visual_data.get("visual_ak_pieces", visual_data.get("visual_chunk38_ak_pieces", [])) as Array, false)
+	var chunk38_tile_groups: Array = _build_attraction_static_tile_groups(visual_data.get("visual_chunk38_tiles", []) as Array, ak_pieces)
+	var footprint_base_tile_groups: Array = _build_attraction_static_tile_groups(visual_data.get("visual_footprint_base_tiles", []) as Array, ak_pieces)
+	if static_pieces.is_empty() and static_tile_groups.is_empty() and frame_static_tile_groups.is_empty() and chunk38_tile_groups.is_empty() and footprint_base_tile_groups.is_empty() and animated_pieces.is_empty() and static_lines.is_empty() and animated_lines.is_empty() and special_pieces.is_empty() and passenger_data.is_empty():
 		return {}
 	return {
 		"id": catalog_id,
-		"jar_type": int(catalog_data.get("jar_type", -1)),
-		"size": Vector2i(int(size_values[0]), int(size_values[1])),
+		"jar_type": jar_type,
+		"size": size,
+		"ride_anchor": _get_attraction_ride_anchor(visual_data, size),
+		"ride_anchors": _get_attraction_ride_anchors(visual_data, size),
 		"static_pieces": static_pieces,
+		"static_tile_groups": static_tile_groups,
+		"frame_static_tile_groups": frame_static_tile_groups,
+		"chunk38_tile_groups": chunk38_tile_groups,
+		"footprint_base_tile_groups": footprint_base_tile_groups,
 		"animated_pieces": animated_pieces,
-		"visual_source": String(catalog_data.get("visual_source", "")),
+		"static_lines": static_lines,
+		"animated_lines": animated_lines,
+		"special_pieces": special_pieces,
+		"passenger_data": passenger_data,
+		"animation_frame_limit": int(visual_data.get("animation_frame_limit", visual_data.get("use_frame_count", catalog_data.get("use_frame_count", 1)))),
+		"visual_frame_modulo": int(visual_data.get("visual_frame_modulo", visual_data.get("visual_animation_frame_count", catalog_data.get("visual_animation_frame_count", 1)))),
+		"animation_frame_count": int(visual_data.get("visual_frame_modulo", visual_data.get("visual_animation_frame_count", catalog_data.get("visual_animation_frame_count", 1)))),
+		"visual_source": String(visual_data.get("visual_source", catalog_data.get("visual_source", ""))),
 	}
+func _attraction_def_has_dynamic_chunk_jobs(attraction_def: Dictionary) -> bool:
+	if include_attraction_frame_static_chunks and not (attraction_def.get("frame_static_tile_groups", []) as Array).is_empty():
+		return true
+	if include_attraction_animated_chunks and debug_draw_animated_chunks and not (attraction_def.get("animated_pieces", []) as Array).is_empty():
+		return true
+	if include_attraction_line_chunks and debug_draw_line_chunks and debug_draw_animated_lines and not (attraction_def.get("animated_lines", []) as Array).is_empty():
+		return true
+	if include_attraction_special_chunks and debug_draw_special_chunks and not (attraction_def.get("special_pieces", []) as Array).is_empty():
+		return true
+	if include_attraction_passenger_chunks and debug_draw_passenger_chunks and bool((attraction_def.get("passenger_data", {}) as Dictionary).get("render_enabled", false)):
+		return true
+	return false
+func _debug_allows_attraction_part(part: String) -> bool:
+	var mode: String = debug_attraction_visual_mode.strip_edges().to_lower()
+	if mode == "" or mode == "all":
+		return true
+	if mode == "none":
+		return false
+	if mode == "base":
+		return part == "footprint" or part == "chunk38"
+	if mode == "footprint":
+		return part == "footprint"
+	if mode == "chunk38":
+		return part == "chunk38"
+	if mode == "static" or mode == "static_chunks":
+		return part == "static"
+	if mode == "animated" or mode == "animated_chunks":
+		return part == "animated"
+	if mode == "lines" or mode == "line_chunks":
+		return part == "static_line" or part == "animated_line"
+	if mode == "static_lines":
+		return part == "static_line"
+	if mode == "animated_lines":
+		return part == "animated_line"
+	if mode == "special" or mode == "special_chunks":
+		return part == "special"
+	if mode == "passenger" or mode == "passengers" or mode == "passenger_chunks":
+		return part == "passenger"
+	return true
+
+
+func _debug_allows_attraction_jar_type(jar_type: int) -> bool:
+	return debug_attraction_only_jar_type < 0 or debug_attraction_only_jar_type == jar_type
+
+
+func _get_attraction_ride_anchor(catalog_data: Dictionary, size: Vector2i) -> Vector2i:
+	var anchor_values: Array = catalog_data.get("visual_ride_anchor", []) as Array
+	if anchor_values.size() >= 2:
+		return Vector2i(int(anchor_values[0]), int(anchor_values[1]))
+	var footprint_codes: Array = catalog_data.get("footprint_codes", []) as Array
+	var footprint_height: int = maxi(1, size.y)
+	for index in range(footprint_codes.size()):
+		if int(footprint_codes[index]) == 10:
+			return Vector2i(floori(float(index) / float(footprint_height)), index % footprint_height)
+	return Vector2i.ZERO
+
+
+func _get_attraction_ride_anchors(catalog_data: Dictionary, size: Vector2i) -> Array:
+	var anchors: Array = []
+	var anchor_entries: Array = catalog_data.get("visual_ride_anchors", []) as Array
+	for anchor_entry in anchor_entries:
+		var anchor_values: Array = anchor_entry as Array
+		if anchor_values.size() >= 2:
+			anchors.append(Vector2i(int(anchor_values[0]), int(anchor_values[1])))
+	if anchors.is_empty():
+		anchors.append(_get_attraction_ride_anchor(catalog_data, size))
+	return anchors
+
+
+func _get_attraction_ride_anchor_for_orientation(attraction_def: Dictionary, orientation: int) -> Vector2i:
+	var anchors: Array = attraction_def.get("ride_anchors", []) as Array
+	if anchors.is_empty():
+		return attraction_def.get("ride_anchor", Vector2i.ZERO) as Vector2i
+	return anchors[clampi(orientation, 0, anchors.size() - 1)] as Vector2i
 
 
 func _build_attraction_piece_defs(piece_entries: Array, is_animated: bool) -> Array:
@@ -929,13 +1269,110 @@ func _build_attraction_piece_defs(piece_entries: Array, is_animated: bool) -> Ar
 			"piece_index": int(piece_data.get("piece_index", pieces.size())),
 			"animated": is_animated,
 		}
+		var visible_frames: Array = piece_data.get("visible_frames", []) as Array
+		if not visible_frames.is_empty():
+			piece_def["visible_frames"] = visible_frames
+			piece_def["frame_dependent"] = bool(piece_data.get("frame_dependent", false))
 		if is_animated:
 			piece_def["animated_offsets_x"] = piece_data.get("animated_offsets_x", []) as Array
 			piece_def["animated_offsets_y"] = piece_data.get("animated_offsets_y", []) as Array
+			piece_def["anchor_frames"] = piece_data.get("anchor_frames", []) as Array
+			piece_def["visible_frames"] = piece_data.get("visible_frames", []) as Array
+			piece_def["frame_count"] = int(piece_data.get("frame_count", 1))
 		pieces.append(piece_def)
+	return pieces
+func _build_attraction_special_piece_defs(piece_entries: Array) -> Array:
+	var pieces: Array = []
+	for piece_entry in piece_entries:
+		var piece_data: Dictionary = piece_entry
+		var texture: Texture2D = _get_or_load_attraction_texture(String(piece_data.get("sheet", "")))
+		if texture == null:
+			continue
+		var region_values: Array = piece_data.get("region", []) as Array
+		var anchor_values: Array = piece_data.get("anchor", [0, 0]) as Array
+		var offset_frames: Array = piece_data.get("offset_frames", []) as Array
+		if region_values.size() < 4 or anchor_values.size() < 2 or offset_frames.is_empty():
+			continue
+		pieces.append({
+			"texture": texture,
+			"region": Rect2(float(region_values[0]), float(region_values[1]), float(region_values[2]), float(region_values[3])),
+			"region_size": Vector2(float(region_values[2]), float(region_values[3])),
+			"anchor": Vector2i(int(anchor_values[0]), int(anchor_values[1])),
+			"anchor_frames": piece_data.get("anchor_frames", []) as Array,
+			"offset_frames": offset_frames,
+			"frame_start": int(piece_data.get("frame_start", 0)),
+			"frame_end": int(piece_data.get("frame_end", -1)),
+			"piece_index": int(piece_data.get("piece_index", pieces.size())),
+			"frame_count": int(piece_data.get("frame_count", 1)),
+		})
 	return pieces
 
 
+func _build_attraction_line_defs(line_entries: Array, is_animated: bool) -> Array:
+	var lines: Array = []
+	for line_entry in line_entries:
+		var line_data: Dictionary = line_entry
+		if bool(line_data.get("skipped_by_chunk4_2", false)):
+			continue
+		var anchor_values: Array = line_data.get("anchor", [0, 0]) as Array
+		var color_values: Array = line_data.get("color", [0, 0, 0]) as Array
+		if anchor_values.size() < 2 or color_values.size() < 3:
+			continue
+		var line_def: Dictionary = {
+			"anchor": Vector2i(int(anchor_values[0]), int(anchor_values[1])),
+			"color": Color8(int(color_values[0]), int(color_values[1]), int(color_values[2])),
+			"line_index": int(line_data.get("line_index", lines.size())),
+			"animated": is_animated,
+			"source": String(line_data.get("source", "")),
+		}
+		if is_animated:
+			var start_frames: Array = line_data.get("start_frames", []) as Array
+			var end_frames: Array = line_data.get("end_frames", []) as Array
+			if start_frames.is_empty() or end_frames.is_empty():
+				continue
+			line_def["start_frames"] = start_frames
+			line_def["end_frames"] = end_frames
+			line_def["frame_count"] = int(line_data.get("frame_count", 1))
+		else:
+			var start_values: Array = line_data.get("start", []) as Array
+			var end_values: Array = line_data.get("end", []) as Array
+			if start_values.size() < 2 or end_values.size() < 2:
+				continue
+			line_def["start"] = Vector2(float(start_values[0]), float(start_values[1]))
+			line_def["end"] = Vector2(float(end_values[0]), float(end_values[1]))
+		lines.append(line_def)
+	return lines
+
+
+func _build_attraction_static_tile_groups(tile_entries: Array, static_pieces: Array) -> Array:
+	var pieces_by_index: Dictionary = {}
+	for piece_entry in static_pieces:
+		var piece: Dictionary = piece_entry
+		pieces_by_index[int(piece.get("piece_index", 0))] = piece
+	var tile_groups: Array = []
+	for tile_entry in tile_entries:
+		var tile_data: Dictionary = tile_entry
+		var anchor_values: Array = tile_data.get("anchor", [0, 0]) as Array
+		var piece_indices: Array = tile_data.get("piece_indices", []) as Array
+		if anchor_values.size() < 2 or piece_indices.is_empty():
+			continue
+		var group_pieces: Array = []
+		for piece_index_entry in piece_indices:
+			var piece_index: int = int(piece_index_entry)
+			if pieces_by_index.has(piece_index):
+				group_pieces.append(pieces_by_index[piece_index])
+		if group_pieces.is_empty():
+			continue
+		tile_groups.append({
+			"orientation": int(tile_data.get("orientation", 0)),
+			"anchor": Vector2i(int(anchor_values[0]), int(anchor_values[1])),
+			"pieces": group_pieces,
+			"chunk_group": int(tile_data.get("chunk_group", tile_groups.size())),
+			"mask_unsigned": int(tile_data.get("mask_unsigned", 0)),
+			"footprint_code": int(tile_data.get("footprint_code", 0)),
+			"source": String(tile_data.get("source", "")),
+		})
+	return tile_groups
 func _get_attraction_def(catalog_id: String, jar_type: int) -> Dictionary:
 	if _attraction_def_cache.has(catalog_id):
 		return _attraction_def_cache[catalog_id] as Dictionary
@@ -950,35 +1387,595 @@ func _get_attraction_instance_static_jobs(building_data: Dictionary, attraction_
 	if _attraction_instance_jobs_cache.has(cache_key):
 		return _attraction_instance_jobs_cache[cache_key] as Array
 	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var orientation: int = int(building_data.get("orientation", 0))
+	var ride_anchor: Vector2i = origin + _get_attraction_ride_anchor_for_orientation(attraction_def, orientation)
 	var jobs: Array = []
-	var static_pieces: Array = attraction_def.get("static_pieces", []) as Array
-	_append_cached_attraction_piece_jobs(jobs, origin, static_pieces)
-	if include_attraction_animated_chunks:
-		var animated_pieces: Array = attraction_def.get("animated_pieces", []) as Array
-		_append_cached_attraction_piece_jobs(jobs, origin, animated_pieces)
+	if debug_draw_chunk38 and _debug_allows_attraction_part("chunk38"):
+		_append_cached_attraction_tile_group_phase_jobs(
+			jobs,
+			origin,
+			attraction_def.get("chunk38_tile_groups", []) as Array,
+			orientation,
+			"high",
+			ATTRACTION_HIGH_CHUNK38_LAYER_OFFSET
+		)
+	if debug_draw_static_chunks and _debug_allows_attraction_part("static"):
+		var static_tile_groups: Array = attraction_def.get("static_tile_groups", []) as Array
+		if not static_tile_groups.is_empty():
+			_append_cached_attraction_tile_group_jobs(jobs, origin, static_tile_groups, orientation)
+		else:
+			var static_pieces: Array = attraction_def.get("static_pieces", []) as Array
+			_append_cached_attraction_piece_jobs(jobs, origin, static_pieces)
+	var static_lines: Array = attraction_def.get("static_lines", []) as Array
+	_append_cached_attraction_line_jobs(jobs, ride_anchor, static_lines)
 	if jobs.size() > 1:
 		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
 	_attraction_instance_jobs_cache[cache_key] = jobs
 	return jobs
+func _append_frame_static_attraction_jobs(jobs: Array, visible_bounds: Rect2i) -> void:
+	_last_frame_static_attraction_job_count = 0
+	if not include_attraction_frame_static_chunks or debug_disable_attraction_render or not use_cached_attraction_chunk_render:
+		return
+	_prepare_attraction_def_cache()
+	var before_count: int = jobs.size()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var catalog_id: String = String(building_data.get("id", "basic_attraction"))
+		var attraction_def: Dictionary = _get_attraction_def(catalog_id, int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty() or (attraction_def.get("frame_static_tile_groups", []) as Array).is_empty():
+			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if not _building_intersects_bounds(origin, size, visible_bounds):
+			continue
+		var frame: int = _get_attraction_animation_frame(building_data, attraction_def)
+		var instance_jobs: Array = _get_attraction_instance_frame_static_jobs(building_data, attraction_def, frame)
+		for job_entry in instance_jobs:
+			var job: Dictionary = job_entry as Dictionary
+			var anchor_tile: Vector2i = job.get("anchor_tile", Vector2i(-9999, -9999)) as Vector2i
+			if _tile_in_bounds(anchor_tile, visible_bounds):
+				jobs.append(job)
+	_last_frame_static_attraction_job_count = jobs.size() - before_count
+
+
+func _get_attraction_instance_frame_static_jobs(building_data: Dictionary, attraction_def: Dictionary, frame: int) -> Array:
+	var cache_key: String = _make_attraction_animated_instance_cache_key(building_data, attraction_def, frame) + "|frame_static"
+	if _attraction_instance_frame_static_jobs_cache.has(cache_key):
+		return _attraction_instance_frame_static_jobs_cache[cache_key] as Array
+	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var orientation: int = int(building_data.get("orientation", 0))
+	var jobs: Array = []
+	if debug_draw_static_chunks and _debug_allows_attraction_part("static"):
+		_append_cached_attraction_tile_group_jobs(jobs, origin, attraction_def.get("frame_static_tile_groups", []) as Array, orientation, frame)
+	if jobs.size() > 1:
+		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
+	_attraction_instance_frame_static_jobs_cache[cache_key] = jobs
+	return jobs
+
+
+func _append_animated_attraction_jobs(jobs: Array, visible_bounds: Rect2i) -> void:
+	_last_animated_attraction_job_count = 0
+	if not include_attraction_animated_chunks or not debug_draw_animated_chunks or debug_disable_attraction_render or not use_cached_attraction_chunk_render:
+		return
+	_prepare_attraction_def_cache()
+	var before_count: int = jobs.size()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var catalog_id: String = String(building_data.get("id", "basic_attraction"))
+		var attraction_def: Dictionary = _get_attraction_def(catalog_id, int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty() or (attraction_def.get("animated_pieces", []) as Array).is_empty():
+			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if not _building_intersects_bounds(origin, size, visible_bounds):
+			continue
+		var frame: int = _get_attraction_animation_frame(building_data, attraction_def)
+		var instance_jobs: Array = _get_attraction_instance_animated_jobs(building_data, attraction_def, frame)
+		for job_entry in instance_jobs:
+			var job: Dictionary = job_entry as Dictionary
+			var anchor_tile: Vector2i = job.get("anchor_tile", Vector2i(-9999, -9999)) as Vector2i
+			if _tile_in_bounds(anchor_tile, visible_bounds):
+				jobs.append(job)
+	_last_animated_attraction_job_count = jobs.size() - before_count
+
+
+func _get_attraction_instance_animated_jobs(building_data: Dictionary, attraction_def: Dictionary, frame: int) -> Array:
+	var cache_key: String = _make_attraction_animated_instance_cache_key(building_data, attraction_def, frame)
+	if _attraction_instance_animated_jobs_cache.has(cache_key):
+		return _attraction_instance_animated_jobs_cache[cache_key] as Array
+	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var orientation: int = int(building_data.get("orientation", 0))
+	var ride_anchor: Vector2i = origin + _get_attraction_ride_anchor_for_orientation(attraction_def, orientation)
+	var jobs: Array = []
+	var animated_pieces: Array = attraction_def.get("animated_pieces", []) as Array
+	if _debug_allows_attraction_part("animated"):
+		for piece_entry in animated_pieces:
+			var piece: Dictionary = piece_entry
+			var visible_frames: Array = piece.get("visible_frames", []) as Array
+			if not _get_frame_bool(visible_frames, frame, true):
+				continue
+			var anchor_offset: Vector2i = _get_frame_anchor_offset(piece, frame)
+			var offset: Vector2 = _get_frame_offset(piece, frame)
+			var anchor_tile: Vector2i = ride_anchor + anchor_offset
+			var job: Dictionary = _make_attraction_piece_job(
+				piece.get("texture", null) as Texture2D,
+				anchor_tile,
+				piece.get("region", Rect2()) as Rect2,
+				offset,
+				HIGH_DRAW_LAYER_ATTRACTION + 200 + int(piece.get("piece_index", 0))
+			)
+			job["anchor_tile"] = anchor_tile
+			jobs.append(job)
+			if debug_draw_chunk_anchors:
+				_append_attraction_debug_anchor_job(jobs, anchor_tile, {
+					"source": "aF animated chunk34",
+					"chunk_group": int(piece.get("piece_index", 0)),
+				})
+	if debug_show_animation_frame:
+		_append_attraction_animation_frame_label_job(jobs, ride_anchor, building_data, attraction_def, frame)
+	if jobs.size() > 1:
+		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
+	_attraction_instance_animated_jobs_cache[cache_key] = jobs
+	return jobs
+
+
+func _append_animated_attraction_line_jobs(jobs: Array, visible_bounds: Rect2i) -> void:
+	_last_attraction_line_job_count = 0
+	if not include_attraction_line_chunks or not debug_draw_line_chunks or not debug_draw_animated_lines or not _debug_allows_attraction_part("animated_line") or debug_disable_attraction_render or not use_cached_attraction_chunk_render:
+		return
+	_prepare_attraction_def_cache()
+	var before_count: int = jobs.size()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var catalog_id: String = String(building_data.get("id", "basic_attraction"))
+		var attraction_def: Dictionary = _get_attraction_def(catalog_id, int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty() or (attraction_def.get("animated_lines", []) as Array).is_empty():
+			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if not _building_intersects_bounds(origin, size, visible_bounds):
+			continue
+		var frame: int = _get_attraction_animation_frame(building_data, attraction_def)
+		var instance_jobs: Array = _get_attraction_instance_animated_line_jobs(building_data, attraction_def, frame)
+		for job_entry in instance_jobs:
+			var job: Dictionary = job_entry as Dictionary
+			var anchor_tile: Vector2i = job.get("anchor_tile", Vector2i(-9999, -9999)) as Vector2i
+			if _tile_in_bounds(anchor_tile, visible_bounds):
+				jobs.append(job)
+	_last_attraction_line_job_count = jobs.size() - before_count
+
+
+func _get_attraction_instance_animated_line_jobs(building_data: Dictionary, attraction_def: Dictionary, frame: int) -> Array:
+	var cache_key: String = _make_attraction_animated_instance_cache_key(building_data, attraction_def, frame) + "|lines"
+	if _attraction_instance_animated_line_jobs_cache.has(cache_key):
+		return _attraction_instance_animated_line_jobs_cache[cache_key] as Array
+	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var orientation: int = int(building_data.get("orientation", 0))
+	var ride_anchor: Vector2i = origin + _get_attraction_ride_anchor_for_orientation(attraction_def, orientation)
+	var jobs: Array = []
+	var animated_lines: Array = attraction_def.get("animated_lines", []) as Array
+	for line_entry in animated_lines:
+		var line_def: Dictionary = line_entry
+		var anchor_tile: Vector2i = ride_anchor + (line_def.get("anchor", Vector2i.ZERO) as Vector2i)
+		var start_offset: Vector2 = _get_frame_vector(line_def.get("start_frames", []) as Array, frame)
+		var end_offset: Vector2 = _get_frame_vector(line_def.get("end_frames", []) as Array, frame)
+		jobs.append(_make_attraction_line_job(
+			anchor_tile,
+			start_offset,
+			end_offset,
+			line_def.get("color", Color.BLACK) as Color,
+			HIGH_DRAW_LAYER_ATTRACTION + 300 + int(line_def.get("line_index", 0))
+		))
+		if debug_show_line_points:
+			_append_attraction_debug_line_points_jobs(jobs, anchor_tile, start_offset, end_offset, line_def.get("color", Color.BLACK) as Color)
+	if jobs.size() > 1:
+		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
+	_attraction_instance_animated_line_jobs_cache[cache_key] = jobs
+	return jobs
+
+
+func _append_special_attraction_jobs(jobs: Array, visible_bounds: Rect2i) -> void:
+	_last_special_attraction_job_count = 0
+	if not include_attraction_special_chunks or not debug_draw_special_chunks or not _debug_allows_attraction_part("special") or debug_disable_attraction_render or not use_cached_attraction_chunk_render:
+		return
+	_prepare_attraction_def_cache()
+	var before_count: int = jobs.size()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var catalog_id: String = String(building_data.get("id", "basic_attraction"))
+		var attraction_def: Dictionary = _get_attraction_def(catalog_id, int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty() or (attraction_def.get("special_pieces", []) as Array).is_empty():
+			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if not _building_intersects_bounds(origin, size, visible_bounds):
+			continue
+		var frame: int = _get_attraction_animation_frame(building_data, attraction_def)
+		var instance_jobs: Array = _get_attraction_instance_special_jobs(building_data, attraction_def, frame)
+		for job_entry in instance_jobs:
+			var job: Dictionary = job_entry as Dictionary
+			var anchor_tile: Vector2i = job.get("anchor_tile", Vector2i(-9999, -9999)) as Vector2i
+			if _tile_in_bounds(anchor_tile, visible_bounds):
+				jobs.append(job)
+	_last_special_attraction_job_count = jobs.size() - before_count
+
+
+func _get_attraction_instance_special_jobs(building_data: Dictionary, attraction_def: Dictionary, frame: int) -> Array:
+	var cache_key: String = _make_attraction_animated_instance_cache_key(building_data, attraction_def, frame) + "|special"
+	if _attraction_instance_special_jobs_cache.has(cache_key):
+		return _attraction_instance_special_jobs_cache[cache_key] as Array
+	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var orientation: int = int(building_data.get("orientation", 0))
+	var ride_anchor: Vector2i = origin + _get_attraction_ride_anchor_for_orientation(attraction_def, orientation)
+	var jobs: Array = []
+	var special_pieces: Array = attraction_def.get("special_pieces", []) as Array
+	for piece_entry in special_pieces:
+		var piece: Dictionary = piece_entry
+		var frame_start: int = int(piece.get("frame_start", 0))
+		var frame_end: int = int(piece.get("frame_end", -1))
+		if frame < frame_start or frame > frame_end:
+			continue
+		var offset_index: int = frame - frame_start
+		var offset: Vector2 = _get_frame_vector_at(piece.get("offset_frames", []) as Array, offset_index)
+		var anchor_offset: Vector2i = _get_special_piece_anchor_offset(piece, frame)
+		var job: Dictionary = _make_attraction_piece_job(
+			piece.get("texture", null) as Texture2D,
+			ride_anchor + anchor_offset,
+			piece.get("region", Rect2()) as Rect2,
+			offset,
+			HIGH_DRAW_LAYER_ATTRACTION + 400 + int(piece.get("piece_index", 0))
+		)
+		job["anchor_tile"] = ride_anchor + anchor_offset
+		jobs.append(job)
+		if debug_show_special_anchors:
+			_append_attraction_debug_anchor_job(jobs, ride_anchor + anchor_offset, {
+				"source": "aD special chunk36",
+				"chunk_group": int(piece.get("piece_index", 0)),
+			})
+	if jobs.size() > 1:
+		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
+	_attraction_instance_special_jobs_cache[cache_key] = jobs
+	return jobs
+
+
+func _append_attraction_passenger_jobs(jobs: Array, visible_bounds: Rect2i) -> void:
+	_last_passenger_attraction_job_count = 0
+	if not include_attraction_passenger_chunks or not debug_draw_passenger_chunks or not _debug_allows_attraction_part("passenger") or debug_disable_attraction_render or not use_cached_attraction_chunk_render:
+		return
+	if _visitor_system == null or not _visitor_system.has_method("get_attraction_occupant_render_snapshot"):
+		return
+	var occupant_snapshot: Dictionary = _visitor_system.call("get_attraction_occupant_render_snapshot") as Dictionary
+	if occupant_snapshot.is_empty():
+		return
+	_prepare_attraction_def_cache()
+	var before_count: int = jobs.size()
+	for building_entry in GameState.buildings:
+		var building_data: Dictionary = building_entry
+		if String(building_data.get("type", "")) != GameState.TILE_TYPE_ATTRACTION and String(building_data.get("category", "")) != GameState.TILE_TYPE_ATTRACTION:
+			continue
+		var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+		var key: String = _attraction_origin_key(origin)
+		if not occupant_snapshot.has(key):
+			continue
+		var catalog_id: String = String(building_data.get("id", "basic_attraction"))
+		var attraction_def: Dictionary = _get_attraction_def(catalog_id, int(building_data.get("jar_type", -1)))
+		if attraction_def.is_empty() or not bool((attraction_def.get("passenger_data", {}) as Dictionary).get("render_enabled", false)):
+			continue
+		if not _debug_allows_attraction_jar_type(int(attraction_def.get("jar_type", building_data.get("jar_type", -1)))):
+			continue
+		var size: Vector2i = attraction_def.get("size", Vector2i.ONE) as Vector2i
+		if not _building_intersects_bounds(origin, size, visible_bounds):
+			continue
+		var raw_frame: int = _get_attraction_raw_animation_frame(building_data, attraction_def)
+		var occupants: Array = occupant_snapshot.get(key, []) as Array
+		var instance_jobs: Array = _get_attraction_instance_passenger_jobs(building_data, attraction_def, raw_frame, occupants)
+		for job_entry in instance_jobs:
+			var job: Dictionary = job_entry as Dictionary
+			var anchor_tile: Vector2i = job.get("anchor_tile", Vector2i(-9999, -9999)) as Vector2i
+			if _tile_in_bounds(anchor_tile, visible_bounds):
+				jobs.append(job)
+	_last_passenger_attraction_job_count = jobs.size() - before_count
+
+
+func _get_attraction_instance_passenger_jobs(building_data: Dictionary, attraction_def: Dictionary, raw_frame: int, occupants: Array) -> Array:
+	var passenger_data: Dictionary = attraction_def.get("passenger_data", {}) as Dictionary
+	if not bool(passenger_data.get("render_enabled", false)):
+		return []
+	var passenger_frames: Array = passenger_data.get("frames", []) as Array
+	if passenger_frames.is_empty():
+		return []
+	var frame_entries: Array = passenger_frames[posmod(raw_frame, passenger_frames.size())] as Array
+	var entries_by_seat: Dictionary = {}
+	for frame_entry in frame_entries:
+		var entry: Dictionary = frame_entry as Dictionary
+		entries_by_seat[int(entry.get("seat_index", 0))] = entry
+	var origin: Vector2i = Vector2i(int(building_data.get("x", -1)), int(building_data.get("y", -1)))
+	var orientation: int = int(building_data.get("orientation", 0))
+	var ride_anchor: Vector2i = origin + _get_attraction_ride_anchor_for_orientation(attraction_def, orientation)
+	var jobs: Array = []
+	for occupant_entry in occupants:
+		var occupant_data: Dictionary = occupant_entry as Dictionary
+		var seat_index: int = int(occupant_data.get("seat_index", 0))
+		if not entries_by_seat.has(seat_index):
+			continue
+		var frame_data: Dictionary = entries_by_seat[seat_index] as Dictionary
+		var texture: Texture2D = occupant_data.get("texture", null) as Texture2D
+		if texture == null:
+			continue
+		var direction: int = int(frame_data.get("direction", 0))
+		var visitor_frame: int = int(frame_data.get("visitor_frame", 0))
+		var source_region: Rect2 = occupant_data.get("region", Rect2()) as Rect2
+		var visitor_node: Node2D = occupant_data.get("visitor", null) as Node2D
+		if _visitor_system != null and visitor_node != null and _visitor_system.has_method("get_visitor_frame_region_for_render"):
+			source_region = _visitor_system.call("get_visitor_frame_region_for_render", visitor_node, direction, visitor_frame) as Rect2
+		var clip_pixels: int = maxi(0, int(frame_data.get("clip_pixels", 0)))
+		if clip_pixels > 0:
+			source_region.size = Vector2(source_region.size.x, maxf(1.0, source_region.size.y - float(clip_pixels)))
+		var tile_values: Array = frame_data.get("tile_offset", [0, 0]) as Array
+		var screen_values: Array = frame_data.get("screen_offset", [10, 10]) as Array
+		if tile_values.size() < 2 or screen_values.size() < 2:
+			continue
+		var anchor_tile: Vector2i = ride_anchor + Vector2i(int(tile_values[0]), int(tile_values[1]))
+		var foot_offset: Vector2 = Vector2(float(screen_values[0]), float(screen_values[1]))
+		jobs.append(_make_attraction_passenger_job(texture, source_region, anchor_tile, foot_offset, seat_index))
+		if debug_show_passenger_anchors:
+			_append_attraction_debug_anchor_job(jobs, anchor_tile, {
+				"source": "passenger chunks 21..24/35/39",
+				"chunk_group": seat_index,
+			})
+	if jobs.size() > 1:
+		jobs.sort_custom(Callable(self, "_sort_high_draw_jobs"))
+	return jobs
+
+
+func _get_attraction_animation_frame(building_data: Dictionary, attraction_def: Dictionary) -> int:
+	if debug_forced_attraction_frame >= 0:
+		return posmod(debug_forced_attraction_frame, maxi(1, int(attraction_def.get("visual_frame_modulo", attraction_def.get("animation_frame_count", 1)))))
+	var visual_frame_modulo: int = maxi(1, int(attraction_def.get("visual_frame_modulo", attraction_def.get("animation_frame_count", 1))))
+	return posmod(_get_attraction_raw_animation_frame(building_data, attraction_def), visual_frame_modulo)
+
+
+func _get_attraction_raw_animation_frame(building_data: Dictionary, attraction_def: Dictionary) -> int:
+	if debug_forced_attraction_frame >= 0:
+		return debug_forced_attraction_frame
+	var instance_key: String = _make_attraction_instance_cache_key(building_data, attraction_def)
+	return int(_attraction_runtime_frames.get(instance_key, int(building_data.get("animation_frame", 0))))
+
+
+func _get_attraction_runtime_state(building_data: Dictionary, attraction_def: Dictionary) -> int:
+	var instance_key: String = _make_attraction_instance_cache_key(building_data, attraction_def)
+	return int(_attraction_runtime_states.get(instance_key, 0))
+
+
+func _append_cached_attraction_tile_group_jobs(jobs: Array, origin: Vector2i, tile_groups: Array, orientation: int = 0, frame: int = -1) -> void:
+	for group_entry in tile_groups:
+		var tile_group: Dictionary = group_entry
+		if int(tile_group.get("orientation", 0)) != orientation:
+			continue
+		var anchor_tile: Vector2i = origin + (tile_group.get("anchor", Vector2i.ZERO) as Vector2i)
+		if debug_draw_chunk_anchors:
+			_append_attraction_debug_anchor_job(jobs, anchor_tile, tile_group)
+		if debug_draw_chunk_labels:
+			_append_attraction_debug_label_job(jobs, anchor_tile, tile_group)
+		var pieces: Array = tile_group.get("pieces", []) as Array
+		for piece_entry in pieces:
+			var piece: Dictionary = piece_entry as Dictionary
+			if frame >= 0 and not _get_frame_bool(piece.get("visible_frames", []) as Array, frame, true):
+				continue
+			_append_cached_attraction_piece_job(jobs, anchor_tile, piece)
+
+
+func _append_cached_attraction_tile_group_phase_jobs(jobs: Array, origin: Vector2i, tile_groups: Array, orientation: int, phase: String, layer_offset_base: int) -> void:
+	for group_entry in tile_groups:
+		var tile_group: Dictionary = group_entry
+		if int(tile_group.get("orientation", 0)) != orientation:
+			continue
+		var anchor_tile: Vector2i = origin + (tile_group.get("anchor", Vector2i.ZERO) as Vector2i)
+		if debug_draw_chunk_anchors:
+			_append_attraction_debug_anchor_job(jobs, anchor_tile, tile_group)
+		if debug_draw_chunk_labels:
+			_append_attraction_debug_label_job(jobs, anchor_tile, tile_group)
+		var pieces: Array = tile_group.get("pieces", []) as Array
+		for piece_entry in pieces:
+			var piece: Dictionary = piece_entry as Dictionary
+			var piece_index: int = int(piece.get("piece_index", 0))
+			if _get_attraction_ak_draw_phase(piece_index) != phase:
+				continue
+			_append_cached_attraction_piece_job(jobs, anchor_tile, piece, layer_offset_base + piece_index)
+
+
+func _get_attraction_ak_draw_phase(piece_index: int) -> String:
+	# JAR order: ap()->a(false) draws low/base aK pieces; ao()->b(false)/c(false)
+	# draws the raised footprint sides after aD()/visitors.
+	match piece_index:
+		0, 1, 2, 7, 8, 11, 12, 13, 14, 15, 16:
+			return "base"
+		3, 4, 5, 6, 9, 10, 17, 18:
+			return "high"
+		_:
+			return "high"
+
+
+func _append_attraction_debug_anchor_job(jobs: Array, anchor_tile: Vector2i, tile_group: Dictionary) -> void:
+	var base_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(tile_width * -0.5, 0.0)
+	var foot_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(0.0, tile_height * 0.5)
+	jobs.append({
+		"draw_type": "debug_anchor",
+		"position": base_position.round(),
+		"radius": 2.0,
+		"color": _get_attraction_debug_color(String(tile_group.get("source", ""))),
+		"anchor_tile": anchor_tile,
+		"depth_key": _depth_key_for_local_position(foot_position, HIGH_DRAW_LAYER_ATTRACTION + 900),
+	})
+
+
+func _append_attraction_debug_label_job(jobs: Array, anchor_tile: Vector2i, tile_group: Dictionary) -> void:
+	var base_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(tile_width * -0.5, 0.0)
+	var foot_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(0.0, tile_height * 0.5)
+	var source: String = String(tile_group.get("source", ""))
+	var label: String = "%s #%d" % [
+		source.split(" ")[0] if source != "" else "chunk",
+		int(tile_group.get("chunk_group", 0)),
+	]
+	jobs.append({
+		"draw_type": "debug_label",
+		"position": (base_position + Vector2(2.0, -4.0)).round(),
+		"text": label,
+		"color": _get_attraction_debug_color(source),
+		"anchor_tile": anchor_tile,
+		"depth_key": _depth_key_for_local_position(foot_position, HIGH_DRAW_LAYER_ATTRACTION + 901),
+	})
+
+
+func _append_attraction_animation_frame_label_job(jobs: Array, anchor_tile: Vector2i, building_data: Dictionary, attraction_def: Dictionary, visual_frame: int) -> void:
+	var base_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(tile_width * -0.5, 0.0)
+	var foot_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(0.0, tile_height * 0.5)
+	var raw_frame: int = _get_attraction_raw_animation_frame(building_data, attraction_def)
+	jobs.append({
+		"draw_type": "debug_label",
+		"position": (base_position + Vector2(2.0, -12.0)).round(),
+		"text": "ab=%d at=%d ag=%d" % [
+			raw_frame,
+			visual_frame,
+			_get_attraction_runtime_state(building_data, attraction_def),
+		],
+		"color": Color(1.0, 0.8, 0.1, 1.0),
+		"anchor_tile": anchor_tile,
+		"depth_key": _depth_key_for_local_position(foot_position, HIGH_DRAW_LAYER_ATTRACTION + 902),
+	})
+
+
+func _get_attraction_debug_color(source: String) -> Color:
+	if source.contains("chunk38"):
+		return Color(0.2, 0.85, 1.0, 1.0)
+	if source.contains("footprint"):
+		return Color(1.0, 0.9, 0.25, 1.0)
+	if source.contains("aE"):
+		return Color(0.35, 1.0, 0.35, 1.0)
+	return Color(1.0, 0.45, 0.9, 1.0)
 
 
 func _append_cached_attraction_piece_jobs(jobs: Array, origin: Vector2i, pieces: Array) -> void:
 	for piece_entry in pieces:
 		var piece: Dictionary = piece_entry
 		var anchor_tile: Vector2i = origin + (piece.get("anchor", Vector2i.ZERO) as Vector2i)
-		var source_region: Rect2 = piece.get("region", Rect2()) as Rect2
-		var offset: Vector2 = piece.get("offset", Vector2.ZERO) as Vector2
-		if bool(piece.get("animated", false)):
-			offset = _get_static_attraction_animation_offset(piece, offset)
-		var job: Dictionary = _make_tile_sprite_job(
-			piece.get("texture", null) as Texture2D,
+		_append_cached_attraction_piece_job(jobs, anchor_tile, piece)
+
+
+func _append_cached_attraction_line_jobs(jobs: Array, origin: Vector2i, lines: Array) -> void:
+	if not include_attraction_line_chunks or not debug_draw_line_chunks or not debug_draw_static_lines or not _debug_allows_attraction_part("static_line"):
+		return
+	for line_entry in lines:
+		var line_def: Dictionary = line_entry
+		var anchor_tile: Vector2i = origin + (line_def.get("anchor", Vector2i.ZERO) as Vector2i)
+		var start_offset: Vector2 = line_def.get("start", Vector2.ZERO) as Vector2
+		var end_offset: Vector2 = line_def.get("end", Vector2.ZERO) as Vector2
+		jobs.append(_make_attraction_line_job(
 			anchor_tile,
-			source_region,
-			offset,
-			HIGH_DRAW_LAYER_ATTRACTION + int(piece.get("piece_index", 0))
-		)
-		job["anchor_tile"] = anchor_tile
-		jobs.append(job)
+			start_offset,
+			end_offset,
+			line_def.get("color", Color.BLACK) as Color,
+			HIGH_DRAW_LAYER_ATTRACTION + 100 + int(line_def.get("line_index", 0))
+		))
+		if debug_show_line_points:
+			_append_attraction_debug_line_points_jobs(jobs, anchor_tile, start_offset, end_offset, line_def.get("color", Color.BLACK) as Color)
+
+
+func _append_attraction_debug_line_points_jobs(jobs: Array, anchor_tile: Vector2i, start_offset: Vector2, end_offset: Vector2, color: Color) -> void:
+	var base_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(tile_width * -0.5, 0.0)
+	var foot_position: Vector2 = tile_to_screen(anchor_tile) + Vector2(0.0, tile_height * 0.5)
+	jobs.append({
+		"draw_type": "debug_anchor",
+		"position": (base_position + start_offset).round(),
+		"radius": 1.5,
+		"color": color,
+		"anchor_tile": anchor_tile,
+		"depth_key": _depth_key_for_local_position(foot_position, HIGH_DRAW_LAYER_ATTRACTION + 998),
+	})
+	jobs.append({
+		"draw_type": "debug_anchor",
+		"position": (base_position + end_offset).round(),
+		"radius": 1.5,
+		"color": color,
+		"anchor_tile": anchor_tile,
+		"depth_key": _depth_key_for_local_position(foot_position, HIGH_DRAW_LAYER_ATTRACTION + 999),
+	})
+
+
+func _append_cached_attraction_piece_job(jobs: Array, anchor_tile: Vector2i, piece: Dictionary, layer_offset_override: int = -999999) -> void:
+	var source_region: Rect2 = piece.get("region", Rect2()) as Rect2
+	var offset: Vector2 = piece.get("offset", Vector2.ZERO) as Vector2
+	if bool(piece.get("animated", false)):
+		offset = _get_static_attraction_animation_offset(piece, offset)
+	var layer_offset: int = layer_offset_override
+	if layer_offset == -999999:
+		layer_offset = HIGH_DRAW_LAYER_ATTRACTION + int(piece.get("piece_index", 0))
+	var job: Dictionary = _make_attraction_piece_job(
+		piece.get("texture", null) as Texture2D,
+		anchor_tile,
+		source_region,
+		offset,
+		layer_offset
+	)
+	job["anchor_tile"] = anchor_tile
+	jobs.append(job)
+
+
+func _make_attraction_piece_job(texture: Texture2D, tile: Vector2i, source_region: Rect2, offset: Vector2, layer_offset: int) -> Dictionary:
+	var base_position: Vector2 = tile_to_screen(tile) + Vector2(tile_width * -0.5, 0.0)
+	var target_position: Vector2 = (base_position + offset).round()
+	var foot_position: Vector2 = tile_to_screen(tile) + Vector2(0.0, tile_height * 0.5)
+	return {
+		"texture": texture,
+		"region": source_region,
+		"region_size": source_region.size,
+		"position": target_position,
+		"depth_key": _depth_key_for_local_position(foot_position, layer_offset),
+	}
+
+
+func _make_attraction_passenger_job(texture: Texture2D, source_region: Rect2, tile: Vector2i, foot_offset: Vector2, seat_index: int) -> Dictionary:
+	var base_position: Vector2 = tile_to_screen(tile) + Vector2(tile_width * -0.5, 0.0)
+	var foot_position: Vector2 = base_position + foot_offset
+	var target_position: Vector2 = (foot_position + Vector2(-source_region.size.x * 0.5, -source_region.size.y)).round()
+	return {
+		"texture": texture,
+		"region": source_region,
+		"region_size": source_region.size,
+		"position": target_position,
+		"anchor_tile": tile,
+		"depth_key": _depth_key_for_local_position(foot_position, HIGH_DRAW_LAYER_VISITOR + seat_index),
+	}
+
+
+func _make_attraction_line_job(tile: Vector2i, start_offset: Vector2, end_offset: Vector2, color: Color, layer_offset: int) -> Dictionary:
+	var base_position: Vector2 = tile_to_screen(tile) + Vector2(tile_width * -0.5, 0.0)
+	var foot_position: Vector2 = tile_to_screen(tile) + Vector2(0.0, tile_height * 0.5)
+	return {
+		"draw_type": "attraction_line",
+		"start": (base_position + start_offset).round(),
+		"end": (base_position + end_offset).round(),
+		"color": color,
+		"width": 1.0,
+		"anchor_tile": tile,
+		"depth_key": _depth_key_for_local_position(foot_position, layer_offset),
+	}
 
 
 func _get_static_attraction_animation_offset(piece: Dictionary, fallback_offset: Vector2) -> Vector2:
@@ -989,14 +1986,85 @@ func _get_static_attraction_animation_offset(piece: Dictionary, fallback_offset:
 	return Vector2(float(animated_x[0]), float(animated_y[0]))
 
 
+func _get_frame_anchor_offset(piece: Dictionary, frame: int) -> Vector2i:
+	var anchor_frames: Array = piece.get("anchor_frames", []) as Array
+	if anchor_frames.is_empty():
+		return piece.get("anchor", Vector2i.ZERO) as Vector2i
+	var frame_values: Array = anchor_frames[posmod(frame, anchor_frames.size())] as Array
+	if frame_values.size() < 2:
+		return piece.get("anchor", Vector2i.ZERO) as Vector2i
+	return Vector2i(int(frame_values[0]), int(frame_values[1]))
+
+
+func _get_frame_offset(piece: Dictionary, frame: int) -> Vector2:
+	var fallback_offset: Vector2 = piece.get("offset", Vector2.ZERO) as Vector2
+	var animated_x: Array = piece.get("animated_offsets_x", []) as Array
+	var animated_y: Array = piece.get("animated_offsets_y", []) as Array
+	if animated_x.is_empty() or animated_y.is_empty():
+		return fallback_offset
+	return Vector2(
+		float(animated_x[posmod(frame, animated_x.size())]),
+		float(animated_y[posmod(frame, animated_y.size())])
+	)
+
+
+func _get_frame_vector(frame_values: Array, frame: int) -> Vector2:
+	if frame_values.is_empty():
+		return Vector2.ZERO
+	var values: Array = frame_values[posmod(frame, frame_values.size())] as Array
+	if values.size() < 2:
+		return Vector2.ZERO
+	return Vector2(float(values[0]), float(values[1]))
+
+
+func _get_frame_vector_at(frame_values: Array, frame_index: int) -> Vector2:
+	if frame_values.is_empty():
+		return Vector2.ZERO
+	var clamped_index: int = clampi(frame_index, 0, frame_values.size() - 1)
+	var values: Array = frame_values[clamped_index] as Array
+	if values.size() < 2:
+		return Vector2.ZERO
+	return Vector2(float(values[0]), float(values[1]))
+
+
+func _get_special_piece_anchor_offset(piece: Dictionary, frame: int) -> Vector2i:
+	var anchor_frames: Array = piece.get("anchor_frames", []) as Array
+	if anchor_frames.is_empty():
+		return piece.get("anchor", Vector2i.ZERO) as Vector2i
+	var frame_values: Array = anchor_frames[posmod(frame, anchor_frames.size())] as Array
+	if frame_values.size() < 2:
+		return piece.get("anchor", Vector2i.ZERO) as Vector2i
+	return Vector2i(int(frame_values[0]), int(frame_values[1]))
+
+
+func _get_frame_bool(values: Array, frame: int, fallback: bool) -> bool:
+	if values.is_empty():
+		return fallback
+	return bool(values[posmod(frame, values.size())])
+
+
 func _make_attraction_instance_cache_key(building_data: Dictionary, attraction_def: Dictionary) -> String:
-	return "%s|%d|%d,%d|%d|animated=%s" % [
+	return "%s|%d|%d,%d|%d" % [
 		String(attraction_def.get("id", building_data.get("id", ""))),
 		int(attraction_def.get("jar_type", building_data.get("jar_type", -1))),
 		int(building_data.get("x", -1)),
 		int(building_data.get("y", -1)),
 		int(building_data.get("orientation", 0)),
-		str(include_attraction_animated_chunks),
+	]
+
+
+func _attraction_origin_key(origin: Vector2i) -> String:
+	return "%d,%d" % [origin.x, origin.y]
+
+
+func _make_attraction_animated_instance_cache_key(building_data: Dictionary, attraction_def: Dictionary, frame: int) -> String:
+	return "%s|%d|%d,%d|%d|frame=%d" % [
+		String(attraction_def.get("id", building_data.get("id", ""))),
+		int(attraction_def.get("jar_type", building_data.get("jar_type", -1))),
+		int(building_data.get("x", -1)),
+		int(building_data.get("y", -1)),
+		int(building_data.get("orientation", 0)),
+		frame,
 	]
 
 
@@ -1640,7 +2708,7 @@ func _log_render_counters() -> void:
 	_last_static_high_rebuild_count_for_log = _static_high_jobs_rebuild_count
 	var static_bounds_refreshes_this_log: int = _static_render_bounds_refresh_count - _last_static_render_bounds_refresh_count_for_log
 	_last_static_render_bounds_refresh_count_for_log = _static_render_bounds_refresh_count
-	print("[IsoMapRender] fps=%d draws=%d redraws=%d low=%d/%d water=%d/%d path=%d/%d high=%d/%d dynamic=%d/%d overlay=%d/%d buildings=%d high_jobs=%d static_jobs=%d dynamic_jobs=%d total_sorted=%d decor_jobs=%d attraction_jobs=%d attraction_instance_jobs=%d attraction_defs=%d visitor_jobs=%d visible_tiles=%d static_tiles=%d visible_bounds=%s static_bounds=%s fixed_world_cache=%s bounds_changed=%s bounds_changes=%d static_bounds_refreshes=%d static_bounds_reason=%s active_visitors=%d high_jobs_usec=%d static_cache_usec=%d dynamic_jobs_usec=%d static_high_rebuilds=%d static_high_rebuilds_s=%d cache_reason=%s entrance_in_isomap=%s entrance_overlay_visible=%s simple_attractions=%s cached_chunks=%s animated_chunks=%s iso_visitors=%s" % [
+	print("[IsoMapRender] fps=%d draws=%d redraws=%d low=%d/%d water=%d/%d path=%d/%d high=%d/%d dynamic=%d/%d overlay=%d/%d buildings=%d high_jobs=%d static_jobs=%d dynamic_jobs=%d total_sorted=%d decor_jobs=%d attraction_jobs=%d frame_static_attraction_jobs=%d animated_attraction_jobs=%d animated_instances_advanced=%d line_attraction_jobs=%d special_attraction_jobs=%d passenger_attraction_jobs=%d attraction_instance_jobs=%d attraction_defs=%d visitor_jobs=%d visible_tiles=%d static_tiles=%d visible_bounds=%s static_bounds=%s fixed_world_cache=%s bounds_changed=%s bounds_changes=%d static_bounds_refreshes=%d static_bounds_reason=%s active_visitors=%d high_jobs_usec=%d static_cache_usec=%d dynamic_jobs_usec=%d static_high_rebuilds=%d static_high_rebuilds_s=%d cache_reason=%s entrance_in_isomap=%s entrance_overlay_visible=%s simple_attractions=%s cached_chunks=%s frame_static_chunks=%s animated_chunks=%s line_chunks=%s special_chunks=%s passenger_chunks=%s iso_visitors=%s" % [
 		Engine.get_frames_per_second(),
 		total_draws,
 		total_redraws,
@@ -1663,6 +2731,12 @@ func _log_render_counters() -> void:
 		_last_total_sorted_job_count,
 		_last_decor_job_count,
 		_last_attraction_job_count,
+		_last_frame_static_attraction_job_count,
+		_last_animated_attraction_job_count,
+		_last_animated_attraction_instances_advanced,
+		_last_attraction_line_job_count,
+		_last_special_attraction_job_count,
+		_last_passenger_attraction_job_count,
 		_last_attraction_instance_job_count,
 		_last_attraction_def_count,
 		_last_visitor_job_count,
@@ -1686,7 +2760,11 @@ func _log_render_counters() -> void:
 		str(_entrance_overlay != null and _entrance_overlay.visible),
 		str(use_simple_attraction_render),
 		str(use_cached_attraction_chunk_render),
+		str(include_attraction_frame_static_chunks),
 		str(include_attraction_animated_chunks),
+		str(include_attraction_line_chunks),
+		str(include_attraction_special_chunks),
+		str(include_attraction_passenger_chunks),
 		str(use_iso_visitor_depth_render and not debug_disable_visitor_render_jobs),
 	])
 	_render_draw_count = 0

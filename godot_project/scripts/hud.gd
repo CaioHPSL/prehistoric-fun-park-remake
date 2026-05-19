@@ -5,6 +5,7 @@ extends Control
 signal build_menu_requested
 signal save_requested
 signal load_requested
+signal visitor_stress_test_toggled(enabled: bool)
 
 var park_controller: Node
 var current_active_visitors: int = 0
@@ -21,6 +22,7 @@ var visitor_debug_stats: Dictionary = {}
 @onready var visitor_label: Label = $TopBar/VisitorLabel
 @onready var build_button: Button = $TopBar/BuildButton
 @onready var stats_button: Button = $TopBar/StatsButton
+@onready var stress_button: Button = $TopBar/StressButton
 @onready var save_button: Button = $TopBar/SaveButton
 @onready var load_button: Button = $TopBar/LoadButton
 @onready var message_label: Label = $MessageLabel
@@ -32,6 +34,7 @@ var visitor_debug_stats: Dictionary = {}
 func _ready() -> void:
 	build_button.pressed.connect(_on_build_pressed)
 	stats_button.pressed.connect(_on_stats_pressed)
+	stress_button.toggled.connect(_on_stress_toggled)
 	save_button.pressed.connect(func() -> void: save_requested.emit())
 	load_button.pressed.connect(func() -> void: load_requested.emit())
 	message_timer.timeout.connect(_on_message_timer_timeout)
@@ -39,6 +42,7 @@ func _ready() -> void:
 	show_build_mode("Build: none")
 	show_selected_object("")
 	update_visitors(0, 0)
+	_update_stress_button(false)
 	message_label.visible = false
 
 
@@ -87,6 +91,7 @@ func update_visitor_debug_stats(stats: Dictionary) -> void:
 	current_active_visitors = int(visitor_debug_stats.get("active_visitors", current_active_visitors))
 	current_max_active_visitors = int(visitor_debug_stats.get("max_active_visitors", current_max_active_visitors))
 	current_served_visitors = int(visitor_debug_stats.get("total_visitors_served", current_served_visitors))
+	_update_stress_button(bool(visitor_debug_stats.get("visitor_stress_test_mode", false)))
 	visitor_label.text = "Visitors: %d/%d Served: %d" % [
 		current_active_visitors,
 		current_max_active_visitors,
@@ -113,7 +118,7 @@ func _update_stats_panel() -> void:
 	if visitor_debug_stats.is_empty():
 		stats_details_label.text = base_text
 		return
-	stats_details_label.text = "%s\nVisitors spawned: %d\nVisitors exited: %d\nSpawn attempts: %d\nSpawn successes: %d\nSpawn failures: %d\nSpawn chance: %d%%\nLast spawn block: %s\nJAR visitor slots: %d" % [
+	stats_details_label.text = "%s\nVisitors spawned: %d\nVisitors exited: %d\nSpawn attempts: %d\nSpawn successes: %d\nSpawn failures: %d\nSpawn chance: %d%%\nSpawn interval: %.2fs\nStress mode: %s\nStress target: %d\nStress multipliers: %.1fx chance, %.2fx interval\nLast spawn block: %s\nJAR visitor slots: %d" % [
 		base_text,
 		int(visitor_debug_stats.get("total_visitors_spawned", 0)),
 		int(visitor_debug_stats.get("total_visitors_exited", 0)),
@@ -121,6 +126,11 @@ func _update_stats_panel() -> void:
 		int(visitor_debug_stats.get("spawn_successes", 0)),
 		int(visitor_debug_stats.get("spawn_failures", 0)),
 		roundi(float(visitor_debug_stats.get("current_spawn_chance", 0.0)) * 100.0),
+		float(visitor_debug_stats.get("current_spawn_interval", 0.0)),
+		"on" if bool(visitor_debug_stats.get("visitor_stress_test_mode", false)) else "off",
+		int(visitor_debug_stats.get("stress_min_active_visitors", 0)),
+		float(visitor_debug_stats.get("stress_spawn_multiplier", 1.0)),
+		float(visitor_debug_stats.get("stress_spawn_interval_multiplier", 1.0)),
 		String(visitor_debug_stats.get("last_spawn_block_reason", "none")),
 		int(visitor_debug_stats.get("visitor_slots_jar_reference", 200)),
 	]
@@ -135,6 +145,18 @@ func _on_build_pressed() -> void:
 func _on_stats_pressed() -> void:
 	_update_stats_panel()
 	stats_panel.visible = not stats_panel.visible
+
+
+func _on_stress_toggled(enabled: bool) -> void:
+	_update_stress_button(enabled)
+	visitor_stress_test_toggled.emit(enabled)
+
+
+func _update_stress_button(enabled: bool) -> void:
+	if stress_button == null:
+		return
+	stress_button.set_pressed_no_signal(enabled)
+	stress_button.text = "Stress On" if enabled else "Stress Off"
 
 
 func _on_message_timer_timeout() -> void:

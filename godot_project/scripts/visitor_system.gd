@@ -128,6 +128,12 @@ const VISITOR_FRAMES: Array = [
 @export var move_speed: float = 80.0
 @export var spawn_interval: float = 4.0
 @export var spawn_chance: float = 0.35
+# Test-only stress multiplier for observing visitors/queues/render under load.
+@export var spawn_test_multiplier: float = 2.0
+@export var visitor_stress_test_mode: bool = false
+@export var stress_spawn_multiplier: float = 5.0
+@export var stress_spawn_interval_multiplier: float = 0.25
+@export var stress_min_active_visitors: int = 80
 @export var require_accessible_attraction_for_spawn: bool = true
 @export var debug_spawn_logs: bool = false
 @export var debug_visitor_ai_logs: bool = false
@@ -152,12 +158,13 @@ var visitor_slots_jar_reference: int = JAR_MAX_NORMAL_VISITORS
 var visitors_served_by_attraction: Dictionary = {}
 var attraction_queues: Dictionary = {}
 var attraction_active_counts: Dictionary = {}
+var attraction_active_visitors: Dictionary = {}
 var attraction_queue_anchor_tiles: Dictionary = {}
 
 
 func _ready() -> void:
 	spawn_timer = Timer.new()
-	spawn_timer.wait_time = spawn_interval
+	spawn_timer.wait_time = _get_current_spawn_interval()
 	spawn_timer.one_shot = false
 	spawn_timer.timeout.connect(spawn_single_visitor)
 	add_child(spawn_timer)
@@ -186,6 +193,8 @@ func get_visitor_render_jobs() -> Array:
 	for visitor in active_visitors:
 		if not is_instance_valid(visitor):
 			continue
+		if _is_visitor_using_attraction(visitor):
+			continue
 		var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
 		if sprite == null or sprite.texture == null or not sprite.region_enabled:
 			continue
@@ -199,11 +208,46 @@ func get_visitor_render_jobs() -> Array:
 	return jobs
 
 
+func get_attraction_occupant_render_snapshot() -> Dictionary:
+	var snapshot: Dictionary = {}
+	for key in attraction_active_visitors.keys():
+		var occupants: Array = attraction_active_visitors[key] as Array
+		var valid_occupants: Array = []
+		var render_occupants: Array = []
+		for occupant_entry in occupants:
+			var visitor: Node2D = occupant_entry as Node2D
+			if not is_instance_valid(visitor) or not _is_visitor_using_attraction(visitor):
+				continue
+			valid_occupants.append(visitor)
+			var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
+			if sprite == null or sprite.texture == null:
+				continue
+			render_occupants.append({
+				"visitor": visitor,
+				"texture": sprite.texture,
+				"region": sprite.region_rect,
+				"seat_index": int(visitor.get_meta("attraction_seat_index", 0)),
+				"visual_variant": int(visitor.get_meta("visual_variant", 0)),
+			})
+		if valid_occupants.is_empty():
+			attraction_active_visitors.erase(key)
+			continue
+		attraction_active_visitors[key] = valid_occupants
+		if not render_occupants.is_empty():
+			snapshot[String(key)] = render_occupants
+	return snapshot
+
+
+func get_visitor_frame_region_for_render(visitor: Node2D, direction: int, frame: int) -> Rect2:
+	return _get_visitor_frame_region(visitor, direction, frame)
+
+
 func _set_visitor_state(visitor: Node2D, state: int) -> void:
 	var old_state: int = _get_visitor_state(visitor)
 	visitor.set_meta("visitor_state", state)
 	if old_state != state:
 		_log_visitor_state(visitor, "%s -> %s" % [_get_visitor_state_name(old_state), _get_visitor_state_name(state)])
+	_apply_visitor_render_mode(visitor)
 
 
 func _get_visitor_state(visitor: Node2D) -> int:
@@ -261,6 +305,7 @@ func _get_visitor_state_name(state: int) -> String:
 
 
 func _process(delta: float) -> void:
+	_update_spawn_timer_interval()
 	for i in range(active_visitors.size() - 1, -1, -1):
 		var visitor: Node2D = active_visitors[i]
 		if not is_instance_valid(visitor):
@@ -282,6 +327,7 @@ func _process(delta: float) -> void:
 
 func start_spawning() -> void:
 	if spawn_timer != null and spawn_timer.is_stopped():
+		_update_spawn_timer_interval()
 		spawn_timer.start()
 
 
@@ -388,7 +434,35 @@ func _calculate_spawn_chance(has_reachable_attraction: bool) -> float:
 	if require_accessible_attraction_for_spawn and not has_reachable_attraction:
 		return 0.0
 	# The JAR computes a dynamic aU and clamps it to 3..80; this port keeps the exported base chance until the full park attractiveness model exists.
-	return clampf(spawn_chance, SPAWN_CHANCE_MIN, SPAWN_CHANCE_MAX)
+	var base_chance: float = clampf(spawn_chance, SPAWN_CHANCE_MIN, SPAWN_CHANCE_MAX)
+	var multiplier: float = maxf(0.0, spawn_test_multiplier)
+	var max_chance: float = SPAWN_CHANCE_MAX
+	if visitor_stress_test_mode:
+		multiplier *= maxf(0.0, stress_spawn_multiplier)
+		max_chance = 1.0
+	var final_chance: float = clampf(base_chance * multiplier, 0.0, max_chance)
+	var stress_target: int = clampi(stress_min_active_visitors, 0, max_active_visitors)
+	if visitor_stress_test_mode and active_visitors.size() < stress_target:
+		final_chance = maxf(final_chance, 1.0)
+	return clampf(final_chance, 0.0, 1.0)
+
+
+func _get_current_spawn_interval() -> float:
+	if visitor_stress_test_mode:
+		return maxf(0.05, spawn_interval * clampf(stress_spawn_interval_multiplier, 0.01, 10.0))
+	return maxf(0.05, spawn_interval)
+
+
+func _update_spawn_timer_interval() -> void:
+	if spawn_timer == null:
+		return
+	var next_interval: float = _get_current_spawn_interval()
+	if absf(spawn_timer.wait_time - next_interval) <= 0.001:
+		return
+	var was_running: bool = not spawn_timer.is_stopped()
+	spawn_timer.wait_time = next_interval
+	if was_running:
+		spawn_timer.start()
 
 
 func _record_spawn_failure(reason: String) -> void:
@@ -447,6 +521,7 @@ func clear_visitor() -> void:
 	active_visitors.clear()
 	attraction_queues.clear()
 	attraction_active_counts.clear()
+	attraction_active_visitors.clear()
 	attraction_queue_anchor_tiles.clear()
 	_reset_visitor_counters()
 	_emit_visitor_stats()
@@ -500,16 +575,26 @@ func get_visitor_debug_stats() -> Dictionary:
 		"spawn_successes": spawn_successes,
 		"spawn_failures": spawn_failures,
 		"current_spawn_chance": current_spawn_chance,
+		"current_spawn_interval": _get_current_spawn_interval(),
 		"last_spawn_block_reason": last_spawn_block_reason,
 		"require_accessible_attraction_for_spawn": require_accessible_attraction_for_spawn,
 		"debug_visitor_stats": debug_visitor_stats,
 		"debug_disable_visitor_spawn": debug_disable_visitor_spawn,
 		"render_visitors_in_iso_map": render_visitors_in_iso_map,
+		"spawn_test_multiplier": spawn_test_multiplier,
+		"visitor_stress_test_mode": visitor_stress_test_mode,
+		"stress_spawn_multiplier": stress_spawn_multiplier,
+		"stress_spawn_interval_multiplier": stress_spawn_interval_multiplier,
+		"stress_min_active_visitors": clampi(stress_min_active_visitors, 0, max_active_visitors),
 	}
 
 
 func get_visitors_served_for_attraction(origin: Vector2i) -> int:
 	return int(visitors_served_by_attraction.get(_attraction_key(origin), 0))
+
+
+func get_attraction_active_counts_snapshot() -> Dictionary:
+	return attraction_active_counts.duplicate()
 
 
 func get_visitors_served_by_attraction() -> Dictionary:
@@ -560,9 +645,9 @@ func _create_visitor() -> Node2D:
 func _apply_visitor_render_mode(visitor: Node2D) -> void:
 	var sprite: Sprite2D = visitor.get_node_or_null("Sprite2D") as Sprite2D
 	if sprite == null:
-		visitor.visible = true
+		visitor.visible = not _is_visitor_using_attraction(visitor)
 		return
-	visitor.visible = not render_visitors_in_iso_map
+	visitor.visible = not render_visitors_in_iso_map and not _is_visitor_using_attraction(visitor)
 	_update_visitor_depth(visitor)
 
 
@@ -1122,11 +1207,14 @@ func _update_attraction_use(visitor: Node2D, delta: float) -> void:
 
 
 func _finish_attraction_use(visitor: Node2D) -> void:
-	visitor.set_meta("using_attraction", false)
-	visitor.set_meta("paid", false)
-	_apply_attraction_satisfaction(visitor)
 	var current_tile: Vector2i = visitor.get_meta("current_tile", GameState.ENTRY_TILE) as Vector2i
 	var target_origin: Vector2i = visitor.get_meta("target_origin", Vector2i(-1, -1)) as Vector2i
+	_unregister_attraction_occupant(visitor, target_origin)
+	visitor.set_meta("using_attraction", false)
+	visitor.set_meta("attraction_seat_index", -1)
+	visitor.set_meta("paid", false)
+	_apply_visitor_render_mode(visitor)
+	_apply_attraction_satisfaction(visitor)
 	visitor.set_meta("last_attraction_key", _attraction_key(target_origin))
 	_release_attraction_slot(target_origin)
 	_try_board_attraction_queue(target_origin)
@@ -1180,12 +1268,13 @@ func _try_board_attraction_queue(origin: Vector2i) -> void:
 		var visitor: Node2D = queue.pop_front() as Node2D
 		if not is_instance_valid(visitor):
 			continue
+		var seat_index: int = _get_next_attraction_seat_index(origin, attraction_capacity)
 		var boarded_queue_index: int = maxi(0, int(visitor.get_meta("queue_index", 0)))
 		visitor.set_meta("last_queue_index", boarded_queue_index)
 		visitor.set_meta("queued_attraction", false)
 		visitor.set_meta("queue_index", -1)
 		visitor.set_meta("queue_origin", Vector2i(-1, -1))
-		if not _begin_attraction_use(visitor, origin):
+		if not _begin_attraction_use(visitor, origin, seat_index):
 			var current_tile: Vector2i = visitor.get_meta("current_tile", GameState.ENTRY_TILE) as Vector2i
 			_send_visitor_to_exit_after_attraction(visitor, current_tile)
 			continue
@@ -1198,14 +1287,16 @@ func _try_board_attraction_queue(origin: Vector2i) -> void:
 	_refresh_queue_positions(origin)
 
 
-func _begin_attraction_use(visitor: Node2D, origin: Vector2i) -> bool:
+func _begin_attraction_use(visitor: Node2D, origin: Vector2i, seat_index: int = 0) -> bool:
 	visitor.set_meta("target_origin", origin)
 	if not _pay_visit(visitor):
 		return false
 	visitor.set_meta("using_attraction", true)
+	visitor.set_meta("attraction_seat_index", seat_index)
 	_set_visitor_state(visitor, STATE_USING_ATTRACTION)
 	visitor.set_meta("use_time_remaining", _get_attraction_use_duration(origin))
 	visitor.set_meta("target_position", visitor.position)
+	_register_attraction_occupant(visitor, origin, seat_index)
 	_reset_visitor_animation(visitor)
 	return true
 
@@ -1246,22 +1337,132 @@ func _release_attraction_slot(origin: Vector2i) -> void:
 		attraction_active_counts.erase(key)
 
 
+func _register_attraction_occupant(visitor: Node2D, origin: Vector2i, seat_index: int) -> void:
+	if origin == Vector2i(-1, -1):
+		return
+	var key: String = _attraction_key(origin)
+	var occupants: Array = attraction_active_visitors.get(key, []) as Array
+	_cleanup_attraction_occupants(occupants)
+	if not occupants.has(visitor):
+		occupants.append(visitor)
+	attraction_active_visitors[key] = occupants
+	visitor.set_meta("attraction_seat_index", seat_index)
+	_apply_visitor_render_mode(visitor)
+
+
+func _unregister_attraction_occupant(visitor: Node2D, origin: Vector2i) -> void:
+	if origin == Vector2i(-1, -1):
+		return
+	var key: String = _attraction_key(origin)
+	var occupants: Array = attraction_active_visitors.get(key, []) as Array
+	for index in range(occupants.size() - 1, -1, -1):
+		var occupant: Node2D = occupants[index] as Node2D
+		if occupant == visitor or not is_instance_valid(occupant):
+			occupants.remove_at(index)
+	if occupants.is_empty():
+		attraction_active_visitors.erase(key)
+	else:
+		attraction_active_visitors[key] = occupants
+
+
+func _cleanup_attraction_occupants(occupants: Array) -> void:
+	for index in range(occupants.size() - 1, -1, -1):
+		var visitor: Node2D = occupants[index] as Node2D
+		if not is_instance_valid(visitor) or not _is_visitor_using_attraction(visitor):
+			occupants.remove_at(index)
+
+
+func _get_next_attraction_seat_index(origin: Vector2i, capacity: int) -> int:
+	var used_seats: Dictionary = {}
+	var occupants: Array = attraction_active_visitors.get(_attraction_key(origin), []) as Array
+	_cleanup_attraction_occupants(occupants)
+	for occupant_entry in occupants:
+		var visitor: Node2D = occupant_entry as Node2D
+		if is_instance_valid(visitor):
+			used_seats[int(visitor.get_meta("attraction_seat_index", 0))] = true
+	for seat_index in range(maxi(1, capacity)):
+		if not used_seats.has(seat_index):
+			return seat_index
+	return maxi(0, occupants.size())
+
+
 func _refresh_queue_positions(origin: Vector2i) -> void:
 	var key: String = _attraction_key(origin)
 	var queue: Array = attraction_queues.get(key, []) as Array
 	_cleanup_attraction_queue(queue)
 	var anchor_tile: Vector2i = _get_queue_anchor_tile(origin)
-	var anchor_position: Vector2 = _tile_to_local_position(anchor_tile)
 	for index in range(queue.size()):
 		var visitor: Node2D = queue[index] as Node2D
 		visitor.set_meta("queue_index", index)
-		# TODO: use attraction orientation like the JAR's dv()/dw() once rotation is represented.
-		var queue_position: Vector2 = anchor_position + Vector2(0.0, QUEUE_VISUAL_SPACING * float(index))
+		var queue_visual: Dictionary = _get_jar_queue_visual_state(origin, anchor_tile, index)
+		var queue_tile: Vector2i = queue_visual.get("tile", anchor_tile) as Vector2i
+		var queue_position: Vector2 = _tile_to_local_position_from_jar_offsets(
+			queue_tile,
+			int(queue_visual.get("g", 10)),
+			int(queue_visual.get("h", 10))
+		)
+		visitor.set_meta("queue_visual_tile", queue_tile)
+		visitor.set_meta("queue_visual_g", int(queue_visual.get("g", 10)))
+		visitor.set_meta("queue_visual_h", int(queue_visual.get("h", 10)))
+		visitor.set_meta("visual_direction", int(queue_visual.get("direction", int(visitor.get_meta("visual_direction", 0)))))
 		visitor.position = queue_position
 		visitor.set_meta("target_position", queue_position)
 		_reset_visitor_animation(visitor)
 		_update_visitor_depth(visitor)
 	attraction_queues[key] = queue
+
+
+func _get_jar_queue_visual_state(origin: Vector2i, anchor_tile: Vector2i, queue_index: int) -> Dictionary:
+	var building_data: Dictionary = _get_basic_attraction_data(origin)
+	var size: Vector2i = _get_attraction_building_size(building_data)
+	var orientation: int = int(building_data.get("orientation", 0))
+	var a_p: int = queue_index * int(QUEUE_VISUAL_SPACING)
+	if orientation == 0:
+		var ae_y: int = origin.y + size.y - 1
+		var base_x: int = clampi(anchor_tile.x, origin.x, origin.x + size.x - 1)
+		if a_p <= 16:
+			if a_p <= 6:
+				return {"tile": Vector2i(base_x, ae_y), "g": a_p + 4, "h": 10, "direction": 2}
+			a_p -= 6
+			return {"tile": Vector2i(base_x, ae_y), "g": 10, "h": 10 - a_p, "direction": 3}
+		a_p -= 16
+		return {
+			"tile": Vector2i(base_x, ae_y - 1 - floori(float(a_p - 1) / 20.0)),
+			"g": 10,
+			"h": posmod(40 - a_p, 20),
+			"direction": 3,
+		}
+	var ae_x: int = origin.x
+	var base_y: int = clampi(anchor_tile.y, origin.y, origin.y + size.y - 1)
+	if a_p <= 14:
+		if a_p <= 5:
+			return {"tile": Vector2i(ae_x, base_y), "g": 10, "h": 15 - a_p, "direction": 3}
+		a_p -= 5
+		return {"tile": Vector2i(ae_x, base_y), "g": 10 + a_p, "h": 10, "direction": 2}
+	a_p -= 15
+	return {
+		"tile": Vector2i(ae_x + 1 + floori(float(a_p) / 20.0), base_y),
+		"g": posmod(a_p, 20),
+		"h": 10,
+		"direction": 2,
+	}
+
+
+func _get_attraction_building_size(building_data: Dictionary) -> Vector2i:
+	if building_data.is_empty():
+		return Vector2i.ONE
+	var width: int = maxi(1, int(building_data.get("width", 1)))
+	var height: int = maxi(1, int(building_data.get("height", 1)))
+	return Vector2i(width, height)
+
+
+func _tile_to_local_position_from_jar_offsets(tile: Vector2i, g_offset: int, h_offset: int) -> Vector2:
+	var tile_position: Vector2 = iso_map.call("tile_to_screen", tile)
+	var foot_position: Vector2 = tile_position + Vector2(
+		float(g_offset - h_offset) * 0.5,
+		float(g_offset + h_offset) * 0.5
+	)
+	return to_local(iso_map.to_global(foot_position))
 
 
 func _ensure_queue_anchor_tile(origin: Vector2i, fallback_tile: Vector2i) -> void:

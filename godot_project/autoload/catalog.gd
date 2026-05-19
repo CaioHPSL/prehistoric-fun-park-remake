@@ -4,9 +4,11 @@ extends Node
 
 const BUILDINGS_PATH := "res://data/buildings.json"
 const BALANCE_PATH := "res://data/balance.json"
+const ATTRACTION_VISUALS_PATH := "res://data/attraction_visual_chunks.json"
 
 var buildings: Dictionary = {}
 var balance: Dictionary = {}
+var attraction_visuals: Dictionary = {}
 
 
 func _ready() -> void:
@@ -16,10 +18,20 @@ func _ready() -> void:
 func load_all() -> void:
 	buildings = _load_json(BUILDINGS_PATH).get("buildings", {})
 	balance = _load_json(BALANCE_PATH)
+	attraction_visuals = _load_json(ATTRACTION_VISUALS_PATH).get("attractions", {})
 
 
 func get_building(catalog_id: String) -> Dictionary:
 	return buildings.get(catalog_id, {})
+
+
+func get_attraction_visual(catalog_id: String, jar_type: int = -1) -> Dictionary:
+	var jar_key: String = str(jar_type)
+	if attraction_visuals.has(jar_key):
+		return attraction_visuals.get(jar_key, {}) as Dictionary
+	var building_data: Dictionary = get_building(catalog_id)
+	jar_key = str(int(building_data.get("jar_type", -1)))
+	return attraction_visuals.get(jar_key, {}) as Dictionary
 
 
 func get_building_ids_by_type(building_type: String) -> Array[String]:

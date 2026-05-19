@@ -51,4 +51,9 @@ func _update_fps_label() -> void:
 				roundi(float(stats.get("current_spawn_chance", 0.0)) * 100.0),
 				String(stats.get("last_spawn_block_reason", "none")),
 			]
+			label_text += "\nStress: %s  Target: %d  Interval: %.2fs" % [
+				"on" if bool(stats.get("visitor_stress_test_mode", false)) else "off",
+				int(stats.get("stress_min_active_visitors", 0)),
+				float(stats.get("current_spawn_interval", 0.0)),
+			]
 	fps_label.text = label_text

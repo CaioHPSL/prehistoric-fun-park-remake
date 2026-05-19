@@ -67,6 +67,8 @@ func _ready() -> void:
 		hud.save_requested.connect(_on_save_requested)
 	if hud.has_signal("load_requested"):
 		hud.load_requested.connect(_on_load_requested)
+	if hud.has_signal("visitor_stress_test_toggled"):
+		hud.visitor_stress_test_toggled.connect(_on_visitor_stress_test_toggled)
 	basic_path_button.pressed.connect(_on_basic_path_pressed)
 	stone_path_button.pressed.connect(_on_stone_path_pressed)
 	bench_button.pressed.connect(_on_bench_pressed)
@@ -621,6 +623,16 @@ func _on_visitor_paid(amount: int) -> void:
 	Economy.earn(amount)
 	if hud.has_method("update_money"):
 		hud.update_money()
+
+
+func _on_visitor_stress_test_toggled(enabled: bool) -> void:
+	visitor_system.set("visitor_stress_test_mode", enabled)
+	if visitor_system.has_method("_update_spawn_timer_interval"):
+		visitor_system.call("_update_spawn_timer_interval")
+	if hud.has_method("show_message"):
+		hud.show_message("Visitor stress: %s" % ("on" if enabled else "off"))
+	if hud.has_method("update_visitor_debug_stats") and visitor_system.has_method("get_visitor_debug_stats"):
+		hud.update_visitor_debug_stats(visitor_system.get_visitor_debug_stats())
 
 
 func _on_visitor_stats_changed(active_count: int, served_count: int) -> void:

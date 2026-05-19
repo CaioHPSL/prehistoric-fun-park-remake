@@ -69,6 +69,11 @@ text = "Build"
 layout_mode = 2
 text = "Stats"
 
+[node name="StressButton" type="Button" parent="TopBar"]
+layout_mode = 2
+toggle_mode = true
+text = "Stress Off"
+
 [node name="SaveButton" type="Button" parent="TopBar"]
 layout_mode = 2
 text = "Save"
