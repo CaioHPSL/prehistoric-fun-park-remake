@@ -1,0 +1,7 @@
+# Configuração restrita a este repositório, quando o projeto é considerado confiável.
+[features]
+memories = true
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
