@@ -2,25 +2,25 @@
 
 Atualizado em: 2026-10-07, America/Cuiaba.
 
-## T-001 — Concluir e validar o bootstrap
+## T-001 — Bootstrap configurado e revisado
 
-- Estado: em andamento.
+- Estado: concluído para criação e revisão; teste real dos perfis pendente.
 - Responsável: mestre, recebendo resultados dos especialistas.
 - Escopo: conferir `AGENTS.md`, `.codex/config.toml`, os seis arquivos de especialistas, os nove arquivos desta memória, `docs/diagnostico-e-plano.md` e `docs/ambiente-multiagentes.md`.
 - Condição de conclusão: arquivos coerentes, configuração local válida e configurações globais existentes preservadas; registrar as verificações realmente executadas.
-- Dependência: terminar a criação dos arquivos.
+- Resultado: sete TOMLs válidos, instruções carregadas e configuração global preservada. A camada local requer confiança no projeto para ficar ativa; descoberta/execução dos perfis será verificada em uma nova sessão na raiz confiável.
 
-## T-002 — Preservar e registrar a base remota existente
+## T-002 — Base remota registrada e preservada
 
-- Estado: pendente.
+- Estado: concluído nesta entrega.
 - Responsável: mestre.
 - Escopo: trabalhar sobre a base localizada em `CaioHPSL/prehistoric-fun-park-remake`, registrar a referência usada e proteger JAR, fontes decompiladas, recursos extraídos, análises e port existente.
 - Condição de conclusão: conjunto de mudanças da entrega inicial contém somente novos arquivos de configuração e documentação, sem alterações no jogo ou nas fontes protegidas.
-- Dependência: repositório já localizado; conferir a base e o conjunto final antes do PR.
+- Resultado: base `34662b0b2add5d7e90bd7a28b3527cabe18b9a96` registrada; diff remoto com somente 19 adições, nenhum arquivo existente modificado ou removido.
 
-## T-003 — Diagnosticar o original e planejar a primeira migração
+## T-003 — Aprofundar o diagnóstico e selecionar o primeiro incremento
 
-- Estado: pendente.
+- Estado: diagnóstico estático inicial e plano apresentados; aprofundamento e comparação de execução pendentes.
 - Responsável: mestre, analista Java e arquiteto Godot, com apoio dos especialistas e do testador conforme necessário.
 - Escopo: ler o Java e as análises existentes, levantar regras com evidências, auditar o port Godot e definir verificações de equivalência. Confirmar ambiente Godot 4.6 e observar a base quando possível.
 - Condição de conclusão: diagnóstico verificável, mapeamento Java→Godot fundamentado e plano gradual para o port existente, distinguindo declarações do README de comportamento validado.
@@ -42,10 +42,10 @@ Atualizado em: 2026-10-07, America/Cuiaba.
 - Condição de conclusão: critérios comparativos atendidos, resultado integrado, mapeamento e funcionalidades atualizados com evidências, contexto recuperável e ausência de dados proibidos.
 - Dependência: T-003 e autorização aplicável à etapa concreta. Nenhuma implementação deve ser iniciada nesta configuração inicial.
 
-## T-005 — Levar a configuração a um PR
+## T-005 — Configuração publicada para revisão
 
-- Estado: pendente.
+- Estado: concluído; PR em rascunho aguardando revisão.
 - Responsável: mestre.
 - Escopo: preparar o PR dos novos arquivos de configuração, perfis, memória e orientação de uso sobre a base remota, preservando todos os arquivos existentes.
 - Condição de conclusão: revisão do conjunto de mudanças confirma escopo documental e de configuração, com validações e limitações descritas.
-- Dependência: T-001 e T-002.
+- Resultado: [PR #3](https://github.com/CaioHPSL/prehistoric-fun-park-remake/pull/3), branch `codex/multiagentes-java-godot`; configuração ainda não incorporada à `main`.

@@ -51,8 +51,9 @@ Registros novos são acrescentados ao histórico. Mudanças de decisão devem ap
 ## D-0006 — Limitar a entrega inicial a configuração e documentação
 
 - Data: 2026-10-07, America/Cuiaba.
-- Estado: aprovada; integração pendente.
+- Estado: aplicada na branch de revisão; incorporação à `main` pendente.
 - Decisão: preparar um PR somente com novos arquivos de configuração, perfis e documentação; não alterar código Java, código Godot, recursos nem análises existentes.
 - Motivo: tornar a estrutura de coordenação revisável e preservar a base de jogo já existente.
 - Evidência: escopo definido para esta configuração após localizar o repositório remoto.
-- Pendência: validar os arquivos e conferir o conjunto final de mudanças antes da integração.
+- Resultado: arquivos validados e diff remoto conferido, somente 19 adições. Publicado como [PR #3 em rascunho](https://github.com/CaioHPSL/prehistoric-fun-park-remake/pull/3).
+- Pendência: revisar o PR e carregar a equipe em uma nova sessão com o projeto confiável, verificando a execução real dos perfis.

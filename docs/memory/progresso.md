@@ -22,7 +22,7 @@ Objetivo atual: preparar uma equipe de IA coordenada por um mestre e a memória 
 | Diagnóstico estático inicial Java→Godot | Parcial | Cinco mapeamentos iniciais com trechos e destinos identificados; equivalência de execução ainda não validada. |
 | Verificação do ambiente e execução Godot | Pendente | Versão 4.6 declarada pelo projeto; nenhum Godot encontrado no `PATH`, sem comprovar ausência de instalação. |
 | Plano de diagnóstico e migração | Concluído | `docs/diagnostico-e-plano.md` e `docs/ambiente-multiagentes.md` revisados; implementação futura em incrementos. |
-| Publicação para revisão | Preparada | Branch `codex/multiagentes-java-godot`, somente novos arquivos de configuração/documentação. Revisão e aplicação ao projeto permanecem separadas da reescrita do jogo. |
+| Publicação para revisão | Concluído | [PR #3 em rascunho](https://github.com/CaioHPSL/prehistoric-fun-park-remake/pull/3), branch `codex/multiagentes-java-godot`. Diff conferido: 19 arquivos adicionados, nenhum arquivo existente modificado ou removido. Aplicação na `main` depende da revisão do PR. |
 | Primeiro fluxo real de migração e integração | Pendente | Ainda não executado. |
 
 ## Contexto de aplicação
