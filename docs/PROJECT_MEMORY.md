@@ -37,6 +37,12 @@
 - `code_quality_reviewer` faz auditoria somente leitura; um implementador designado faz alterações e `qa_reviewer` verifica regressões.
 - Otimizações exigem indicação de custo/medição sempre que possível; refatorações devem ser pequenas, isoladas e testáveis.
 
+## Especialistas adicionados
+- Performance: diagnostico com evidencias e medicoes quando possivel, sem edicao.
+- Testes: implementacao de testes sob atribuicao, separada da revisao QA.
+- Recursos J2ME: leitura e mapeamento de atlas, sprites e dados originais, sem edicao.
+- Delegar somente quando necessario; manter escopos distintos e evitar alteracoes concorrentes.
+
 ## Decisões novas
 | Data | Decisão | Motivo/evidência | Status |
 | --- | --- | --- | --- |
