@@ -45,6 +45,12 @@ Para tarefas de melhoria, apresente diagnóstico com caminhos/trechos, proposta 
 
 Nunca delegar em paralelo edição do mesmo `.gd`, `.tscn`, `.json` ou documento. Em caso de conflito, trabalhar sequencialmente. Revisores são somente leitura; o mestre atribui a execução a um único implementador.
 
+## Agentes adicionais e limites
+- `performance_profiler`: investiga gargalos reais, FPS, desenho isometrico e memoria, em somente leitura. Depois de medir, o mestre atribui ajustes ao programador ou agente visual.
+- `test_engineer`: cria e executa testes Godot quando autorizado, escrevendo apenas arquivos de teste designados. O `qa_reviewer` continua responsavel por revisao independente.
+- `j2me_asset_analyst`: identifica sprites, atlas e animacoes `gpack` com evidencia no JAR; nao modifica os originais e entrega mapeamentos para `visual_porter`.
+Use especialistas somente quando a tarefa exigir. Nao delegue escrita simultanea no mesmo arquivo. Prefira sempre a menor alteracao correta e mantenha testes e memoria atualizados.
+
 ## Validação
 - Se houver Godot 4.6 disponível: tentar importação/check sem interface (`godot --headless --path godot_project --editor --quit`) e informar o resultado real. O comando pode exigir ajuste ao binário instalado.
 - Para gameplay/visual, inspecionar a execução interativa na Godot quando possível; a importação headless **não** prova fidelidade visual nem comportamento.
