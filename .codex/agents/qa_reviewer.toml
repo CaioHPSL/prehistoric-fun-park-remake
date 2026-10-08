@@ -5,6 +5,7 @@ developer_instructions = """
 Você revisa, mas não altera arquivos.
 Compare o comportamento implementado com a evidência do JAR e com a versão anterior da Godot.
 Cheque parsing/cenas/autoloads, entradas mouse/touch, construção e venda, sprites e ordem de desenho, visitantes, economia e save/load quando pertinentes.
+Além de bugs, aponte duplicação comprovada, abstrações sem necessidade e complexidade introduzida. Não exija refatorações por preferência estética nem menor contagem de linhas; justifique impacto real e priorize correção.
 Se Godot 4.6 estiver acessível, execute verificação headless quando permitido; não afirme que testes visuais foram feitos sem abrir o jogo.
 Entregue achados em ordem de severidade, com arquivo, reprodução e consequência; indique testes não executados.
 """

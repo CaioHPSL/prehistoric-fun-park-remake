@@ -21,15 +21,29 @@ Portar com fidelidade o jogo J2ME Prehistoric Fun Park para Godot 4.6/GDScript, 
 - Antes de mexer em saves, coordenadas, sprites ou economia, procurar dependências e pensar em regressões.
 - Nunca armazenar credenciais, tokens ou dados pessoais em memória ou logs.
 
+## Princípio: código simples, legível e sustentável
+Antes de criar código novo ou refatorar código existente, pergunte explicitamente:
+1. **Precisa mesmo?** O requisito pode ser atendido com o comportamento que já existe?
+2. **Já existe solução?** Há função, autoload, cena, dado, sinal ou utilitário reaproveitável? Evite implementar o mesmo conceito em dois lugares.
+3. **Qual é a menor alteração segura?** É possível modificar uma rotina existente em vez de acrescentar mais camadas, classes ou gerenciadores?
+4. **Esta abstração se justifica?** Não crie heranças, fábricas, wrappers ou helpers para casos isolados. Extraia funções quando derem nomes úteis a regras repetidas ou muito difíceis de ler.
+5. **Dá para tornar menor e mais claro?** Remova duplicações e caminhos mortos **somente após confirmar uso e dependências**. Não compacte código ou misture responsabilidades só para diminuir linhas.
+6. **Há custo real?** Para otimização, identifique a operação cara (render, alocação, buscas, desenho por frame) e meça quando possível. Não sacrifique correção e legibilidade por micro-otimizações sem evidência.
+7. **Vai continuar fiel ao jogo?** Qual estado, animação, ordem isométrica, regra econômica, sinal, save ou input pode mudar? Verifique antes/depois.
+
+**Ordem de preferência:** não mudar se não for necessário → reutilizar → corrigir/ajustar localmente → refatorar pontualmente com validação → criar componente novo apenas por necessidade demonstrada. **Menos linhas não é sinônimo de melhor código.**
+Refatoração deve preservar resultado observável salvo pedido explícito. Não misture grandes limpezas com implementação de mecânicas na mesma alteração; faça commits/revisões separados quando possível.
+Para tarefas de melhoria, apresente diagnóstico com caminhos/trechos, proposta mínima, impacto, riscos e critérios de aceite **antes** de reescritas grandes. Corrija erros reais primeiro; se não houver problema verificável, não invente trabalho.
+
 ## Orquestração do mestre
 1. Ler a memória/progresso e inspecionar o estado real do repositório.
-2. Identificar uma unidade pequena de trabalho, com critérios de aceite e arquivos donos.
+2. Identificar uma unidade pequena de trabalho, com critérios de aceite e arquivos donos. Antes de codificar, avaliar reutilização, duplicação, legibilidade e se a mudança é necessária.
 3. Pedir ao `jar_analyst` evidências do comportamento original, ao `godot_architect` um plano se a mudança for estrutural, e delegar implementação ao `gameplay_porter` ou `visual_porter` apenas quando os escopos não colidirem.
-4. Usar `qa_reviewer` para revisar a integração e regressões. Os subagentes reportam ao mestre; o mestre decide e valida.
+4. Quando a tarefa envolver limpeza, refatoração, desempenho ou simplificação, consultar `code_quality_reviewer` para diagnóstico **sem edição**. Usar `qa_reviewer` para revisar a integração e regressões. Os subagentes reportam ao mestre; o mestre decide e valida.
 5. Usar `memory_curator` para atualizar os arquivos de memória **depois** de confirmar os resultados, ou o mestre atualiza diretamente.
 6. Ao encerrar, registrar: o que mudou, evidências do JAR, arquivos, testes executados, testes não executados, riscos e próxima tarefa.
 
-Nunca delegar em paralelo edição do mesmo `.gd`, `.tscn`, `.json` ou documento. Em caso de conflito, trabalhar sequencialmente.
+Nunca delegar em paralelo edição do mesmo `.gd`, `.tscn`, `.json` ou documento. Em caso de conflito, trabalhar sequencialmente. Revisores são somente leitura; o mestre atribui a execução a um único implementador.
 
 ## Validação
 - Se houver Godot 4.6 disponível: tentar importação/check sem interface (`godot --headless --path godot_project --editor --quit`) e informar o resultado real. O comando pode exigir ajuste ao binário instalado.

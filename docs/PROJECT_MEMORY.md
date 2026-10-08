@@ -31,10 +31,17 @@
 4. Verificar impacto no save, controles, renderização e economia.
 5. Usar os arquivos versionados como memória compartilhada; memória nativa do Codex é opcional/complementar.
 
+## Política de qualidade e refatoração
+- O mestre pode solicitar manutenção e melhoria do código existente, não apenas migração de novas funcionalidades.
+- Regra: eliminar necessidade e duplicação antes de criar mais código, sem sacrificar legibilidade nem equivalência com o JAR original.
+- `code_quality_reviewer` faz auditoria somente leitura; um implementador designado faz alterações e `qa_reviewer` verifica regressões.
+- Otimizações exigem indicação de custo/medição sempre que possível; refatorações devem ser pequenas, isoladas e testáveis.
+
 ## Decisões novas
 | Data | Decisão | Motivo/evidência | Status |
 | --- | --- | --- | --- |
 | 2026-10-07 | Adicionar mestre em AGENTS.md e subagentes de port, revisão e memória | Permitir divisão de tarefas com revisão e preservação do código original | Configuração proposta; validar no cliente Codex |
+| 2026-10-07 | Exigir avaliação da menor mudança segura e auditoria de código existente | Evitar duplicação, abstrações sem valor e reescritas sem necessidade | Regra e novo revisor definidos; testes locais pendentes |
 
 ## Perguntas em aberto
 - Quais partes da v0.2 já foram testadas manualmente na Godot e em qual versão?
