@@ -1,0 +1,11 @@
+# Configuração local: mantém modelo, esforço, autenticação e permissões herdados.
+[features]
+multi_agent = true
+
+[agents]
+enabled = true
+# Limite de especialistas concorrentes; não inclui o agente mestre principal.
+max_concurrent_threads_per_session = 3
+
+# Os perfis standalone em .codex/agents/*.toml são descobertos pelo Codex atual.
+# A memória do projeto fica em docs/memory/; memória nativa é controlada globalmente.
