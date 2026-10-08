@@ -19,6 +19,11 @@ Consulte a matriz completa em `docs/JAR_SYSTEM_BREAKDOWN_AND_PORT_PLAN.md`, que 
 | --- | --- | --- | --- | --- |
 | 2026-10-07 | Estruturar equipe de Codex e memória versionada | Configuração proposta em branch, sem alterar gameplay | Arquivos de configuração; testes de execução do Codex/Godot pendentes | Validar carregamento de agentes no cliente e selecionar primeiro sistema |
 
+## Configuracao dos agentes
+- 2026-10-07: adicionados `performance_profiler`, `test_engineer` e `j2me_asset_analyst` ao PR #4.
+- Nenhum script Godot ou recurso original foi alterado nesta etapa.
+- Carregamento pelo Codex, validacao TOML e testes na engine ainda nao executados.
+
 ## Critério de conclusão para futuras tarefas
 - [ ] Comportamento original localizado e evidência documentada, ou divergência deliberada aprovada.
 - [ ] Arquivos afetados mapeados; conflitos de edição evitados.
